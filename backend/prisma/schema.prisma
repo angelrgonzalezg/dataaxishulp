@@ -1,0 +1,99 @@
+// DataAxis Hulp — Prisma schema (SQL Server)
+
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native"]
+  output        = "../src/generated/client"
+}
+
+datasource db {
+  provider = "sqlserver"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  userId       Int      @id @default(autoincrement()) @map("user_id")
+  username     String   @unique @db.NVarChar(50)
+  email        String   @unique @db.NVarChar(100)
+  passwordHash String   @map("password_hash") @db.NVarChar(255)
+  fullName     String?  @map("full_name") @db.NVarChar(150)
+  role         String   @db.NVarChar(30)
+  isActive     Boolean  @default(true) @map("is_active")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @default(now()) @updatedAt @map("updated_at")
+
+  createdIssues   Issue[]        @relation("IssueCreatedBy")
+  assignedIssues  Issue[]        @relation("IssueAssignedTo")
+  resolvedIssues  Issue[]        @relation("IssueResolvedBy")
+  historyEntries  IssueHistory[] @relation("HistoryActor")
+
+  @@map("users")
+}
+
+model SystemConnection {
+  systemId      Int       @id @default(autoincrement()) @map("system_id")
+  systemKey     String    @unique @map("system_key") @db.NVarChar(50)
+  name          String    @db.NVarChar(120)
+  description   String?   @db.NVarChar(500)
+  /// Env var name that holds the connection URL (never store passwords in DB)
+  envVarName    String    @map("env_var_name") @db.NVarChar(100)
+  host          String?   @db.NVarChar(200)
+  port          Int?      @default(1433)
+  databaseName  String?   @map("database_name") @db.NVarChar(120)
+  isActive      Boolean   @default(true) @map("is_active")
+  lastCheckedAt DateTime? @map("last_checked_at")
+  lastStatus    String?   @map("last_status") @db.NVarChar(30)
+  lastError     String?   @map("last_error") @db.NVarChar(500)
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @default(now()) @updatedAt @map("updated_at")
+
+  issues Issue[]
+
+  @@map("system_connections")
+}
+
+model Issue {
+  issueId          Int       @id @default(autoincrement()) @map("issue_id")
+  title            String    @db.NVarChar(200)
+  description      String    @db.NVarChar(Max)
+  systemId         Int       @map("system_id")
+  status           String    @default("open") @db.NVarChar(30)
+  priority         String    @default("medium") @db.NVarChar(20)
+  category         String?   @db.NVarChar(80)
+  externalRef      String?   @map("external_ref") @db.NVarChar(120)
+  resolutionNotes  String?   @map("resolution_notes") @db.NVarChar(Max)
+  createdById      Int       @map("created_by_id")
+  assignedToId     Int?      @map("assigned_to_id")
+  resolvedById     Int?      @map("resolved_by_id")
+  resolvedAt       DateTime? @map("resolved_at")
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @default(now()) @updatedAt @map("updated_at")
+
+  system     SystemConnection @relation(fields: [systemId], references: [systemId])
+  createdBy  User             @relation("IssueCreatedBy", fields: [createdById], references: [userId])
+  assignedTo User?            @relation("IssueAssignedTo", fields: [assignedToId], references: [userId], onDelete: NoAction, onUpdate: NoAction)
+  resolvedBy User?            @relation("IssueResolvedBy", fields: [resolvedById], references: [userId], onDelete: NoAction, onUpdate: NoAction)
+  history    IssueHistory[]
+
+  @@index([status])
+  @@index([systemId])
+  @@index([priority])
+  @@map("issues")
+}
+
+model IssueHistory {
+  historyId  Int      @id @default(autoincrement()) @map("history_id")
+  issueId    Int      @map("issue_id")
+  action     String   @db.NVarChar(50)
+  fromStatus String?  @map("from_status") @db.NVarChar(30)
+  toStatus   String?  @map("to_status") @db.NVarChar(30)
+  comment    String?  @db.NVarChar(Max)
+  actorId    Int      @map("actor_id")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  issue Issue @relation(fields: [issueId], references: [issueId], onDelete: Cascade)
+  actor User  @relation("HistoryActor", fields: [actorId], references: [userId], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([issueId])
+  @@map("issue_history")
+}

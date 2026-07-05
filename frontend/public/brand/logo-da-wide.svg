@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 220 48" fill="none">
+  <rect width="48" height="48" rx="12" fill="#1c6796"/>
+  <path d="M12 30V18l12-6 12 6v12l-12 6-12-6z" stroke="#fff" stroke-width="2.5" fill="none"/>
+  <path d="M24 12v24M12 18l12 6 12-6" stroke="#fff" stroke-width="2.5"/>
+  <text x="60" y="32" font-family="Inter, Arial, sans-serif" font-size="22" font-weight="800" fill="#ffffff">DataAxis</text>
+</svg>
