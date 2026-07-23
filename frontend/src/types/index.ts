@@ -254,8 +254,52 @@ export interface ParcelSupportLookup {
     limited_rights_details: number;
     share_details: number;
     order_links: number;
+    split_role?: 'source' | 'result' | 'none';
+    split_flag?: boolean;
+    split_child_count?: number;
+    split_child_esris?: string[];
+    split_parent_parcel_id?: number | null;
+    split_parent_esri?: string | null;
   } | null;
   frames: TableFrame[];
+}
+
+export interface LegalFactOption {
+  id: number;
+  code: string | null;
+  name_nl: string | null;
+  name_en: string | null;
+}
+
+export interface DeedLegalFactState {
+  system_key: string;
+  system_name: string;
+  is_production: boolean;
+  deed_id: number;
+  register: string | null;
+  segment: number | null;
+  number: number | null;
+  legal_fact_id: number | null;
+  legal_fact_code: string | null;
+  legal_fact_name_nl: string | null;
+  legal_fact_name_en: string | null;
+}
+
+export interface UpdateDeedLegalFactResult {
+  deed_id: number;
+  system_key: string;
+  system_name: string;
+  is_production: boolean;
+  previous: LegalFactOption | null;
+  next: LegalFactOption;
+}
+
+export interface DeedTypeAkteOption {
+  deedId: number;
+  title: string;
+  legalFactId: number | null;
+  legalFactCode: string | null;
+  legalFactNameNl: string | null;
 }
 
 export interface DeedHistorySupportLookup {
@@ -337,6 +381,10 @@ export interface InzageObjectReport {
     particulars: string | null;
     split_flag: boolean;
     is_reviewed: boolean;
+    split_role?: 'source' | 'result' | 'none';
+    split_child_esris?: string[];
+    split_parent_esri?: string | null;
+    split_parent_parcel_id?: number | null;
   };
   sections: InzageSection[];
   linked_subjects: Array<{ subject_id: number; name: string }>;

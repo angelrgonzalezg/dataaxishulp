@@ -11,6 +11,12 @@ export function isProductionSystem(systemKey: string, envVarName?: string | null
   return key.includes('_prod') || env.includes('_PROD');
 }
 
+/** Tereno / DLV Aruba uses Parcel + DeedDetail.plotId (not Kadaster PerceelTb). */
+export function isTerenoSupportSystem(systemKey: string): boolean {
+  const key = systemKey.toLowerCase();
+  return key.startsWith('dlv_') || key.includes('tereno') || key.includes('aruba');
+}
+
 export async function resolveSupportSystem(systemKey: string): Promise<{
   system_key: string;
   system_name: string;

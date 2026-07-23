@@ -6,10 +6,12 @@ import {
   filterByIds,
   getFieldNumber,
   getFieldString,
+  isTerenoSupportSystem,
   queryByIds,
   querySafe,
   resolveSupportSystem,
 } from './support.frames';
+import { lookupParcelTereno } from './support.parcel.tereno.service';
 import type { ParcelSupportLookup, TableFrame } from './support.types';
 
 /** Same legalFactTypeId groups used by Kadaster parcels Andere details (Alles). */
@@ -83,6 +85,15 @@ export async function lookupParcel(input: {
   systemKey?: string;
 }): Promise<ParcelSupportLookup> {
   const systemKey = input.systemKey?.trim() || DEFAULT_SYSTEM_KEY;
+
+  if (isTerenoSupportSystem(systemKey)) {
+    return lookupParcelTereno({
+      parcelId: input.parcelId,
+      meetBrief: input.meetBrief,
+      systemKey,
+    });
+  }
+
   const system = await resolveSupportSystem(systemKey);
   const { parcels, entry } = await resolveParcelRows(systemKey, input);
 
@@ -90,7 +101,7 @@ export async function lookupParcel(input: {
     const label = input.parcelId
       ? `Parcel ${input.parcelId}`
       : `Meet brief "${input.meetBrief}"`;
-    throw new NotFoundError(`${label} not found in Kadaster Statia`);
+    throw new NotFoundError(`${label} not found in ${system.system_name}`);
   }
 
   const candidates = parcels.map((parcel) => ({

@@ -1,10 +1,12 @@
 import { NotFoundError, ValidationError } from '../../utils/AppError';
+import { querySystem } from '../../utils/externalDb';
 import {
   DEFAULT_SYSTEM_KEY,
   asNumberIds,
   buildFrame,
   getFieldNumber,
   getFieldString,
+  isTerenoSupportSystem,
   queryByIds,
   querySafe,
   resolveSupportSystem,
@@ -48,18 +50,26 @@ async function resolveSeedDeeds(
   systemKey: string,
   parsed: { register: string; segment: number; number: number },
 ): Promise<Record<string, unknown>[]> {
-  return querySafe(
+  // Tereno/DLV: Deed.legalFactRegisterId → LegalFactRegister.id
+  // Kadaster:   Deed.DeedTypeId → LegalFactRegister.id
+  const tereno = isTerenoSupportSystem(systemKey);
+  const registerFk = tereno ? 'legalFactRegisterId' : 'DeedTypeId';
+
+  // Use querySystem (not querySafe): a bad SQL used to return [] and look like "not found".
+  // Bracket [number] — reserved/ambiguous as bare identifier with some drivers.
+  // Param names avoid clashing with column name "number".
+  return querySystem(
     systemKey,
     `SELECT d.*
      FROM Deed d
-     INNER JOIN LegalFactRegister lfr ON lfr.id = d.DeedTypeId
-     WHERE UPPER(LTRIM(RTRIM(lfr.register))) = @register
-       AND d.Segment = @segment
-       AND d.Number = @number`,
+     INNER JOIN LegalFactRegister lfr ON lfr.id = d.${registerFk}
+     WHERE UPPER(LTRIM(RTRIM(lfr.register))) = @registerCode
+       AND d.[segment] = @deedSegment
+       AND d.[number] = @deedNumber`,
     {
-      register: parsed.register,
-      segment: parsed.segment,
-      number: parsed.number,
+      registerCode: parsed.register,
+      deedSegment: parsed.segment,
+      deedNumber: parsed.number,
     },
   );
 }
@@ -308,17 +318,19 @@ function buildHistoryGraphRows(
 
   return history.map((node) => {
     const deed = deedById.get(node.deedId) ?? {};
-    const registerId = getFieldNumber(deed, 'DeedTypeId');
+    const registerId = getFieldNumber(deed, 'legalFactRegisterId', 'DeedTypeId');
     const register = registerId ? registerById.get(registerId) : undefined;
     const registerCode = getFieldString(register ?? {}, 'register') ?? '';
-    const segment = getFieldNumber(deed, 'Segment');
-    const number = getFieldNumber(deed, 'Number');
+    const segment = getFieldNumber(deed, 'segment', 'Segment');
+    const number = getFieldNumber(deed, 'number', 'Number');
     const fromDeed = node.foundFromDeedId ? deedById.get(node.foundFromDeedId) : undefined;
-    const fromRegisterId = fromDeed ? getFieldNumber(fromDeed, 'DeedTypeId') : null;
+    const fromRegisterId = fromDeed
+      ? getFieldNumber(fromDeed, 'legalFactRegisterId', 'DeedTypeId')
+      : null;
     const fromRegister = fromRegisterId ? registerById.get(fromRegisterId) : undefined;
     const fromRegisterCode = getFieldString(fromRegister ?? {}, 'register') ?? '';
-    const fromSegment = fromDeed ? getFieldNumber(fromDeed, 'Segment') : null;
-    const fromNumber = fromDeed ? getFieldNumber(fromDeed, 'Number') : null;
+    const fromSegment = fromDeed ? getFieldNumber(fromDeed, 'segment', 'Segment') : null;
+    const fromNumber = fromDeed ? getFieldNumber(fromDeed, 'number', 'Number') : null;
 
     return {
       Depth: node.depth,
@@ -339,8 +351,8 @@ function buildHistoryGraphRows(
 }
 
 function registerTitleFromDeed(deed: Record<string, unknown>, registerCode: string): string | null {
-  const segment = getFieldNumber(deed, 'Segment');
-  const number = getFieldNumber(deed, 'Number');
+  const segment = getFieldNumber(deed, 'segment', 'Segment');
+  const number = getFieldNumber(deed, 'number', 'Number');
   if (segment == null || number == null) return null;
   return `${registerCode} ${segment}-${number}`.trim();
 }
@@ -353,17 +365,29 @@ async function resolveHistoryDeedDetailIds(
   if (historyDeedIds.length === 0) return [];
 
   const { clause, params } = buildInClause(historyDeedIds, 'hid');
-  const rows = await querySafe(
-    systemKey,
-    `SELECT Id
-     FROM DeedDetail
-     WHERE DeedID IN (${clause})
-        OR amendedDeedId IN (${clause})
-        OR RetiredByRecordDeedId IN (${clause})`,
-    params,
-  );
+  const tereno = isTerenoSupportSystem(systemKey);
 
-  const ids = new Set(asNumberIds(rows, 'Id'));
+  // Tereno has no amendedDeedId; Kadaster may still use DeedID / amendedDeedId naming.
+  const rows = tereno
+    ? await querySafe(
+        systemKey,
+        `SELECT id
+         FROM DeedDetail
+         WHERE deedId IN (${clause})
+            OR retiredByRecordDeedId IN (${clause})`,
+        params,
+      )
+    : await querySafe(
+        systemKey,
+        `SELECT Id
+         FROM DeedDetail
+         WHERE DeedID IN (${clause})
+            OR amendedDeedId IN (${clause})
+            OR RetiredByRecordDeedId IN (${clause})`,
+        params,
+      );
+
+  const ids = new Set(asNumberIds(rows, 'id'));
 
   if (hasRetiredByDeedDetailId) {
     const retiredRows = await querySafe(
@@ -375,7 +399,7 @@ async function resolveHistoryDeedDetailIds(
        )`,
       params,
     );
-    for (const id of asNumberIds(retiredRows, 'Id')) {
+    for (const id of asNumberIds(retiredRows, 'id')) {
       ids.add(id);
     }
   }
@@ -414,8 +438,11 @@ export async function lookupDeedHistoryByTitle(
   const history = await traceDeedHistory(systemKey, seedDeedIds, hasRetiredByDeedDetailId);
   const historyDeedIds = history.map((node) => node.deedId);
 
+  const tereno = isTerenoSupportSystem(systemKey);
   const deeds = await queryByIds(systemKey, 'Deed', 'id', historyDeedIds);
-  const registerIds = asNumberIds(deeds, 'DeedTypeId');
+  const registerIds = tereno
+    ? asNumberIds(deeds, 'legalFactRegisterId')
+    : asNumberIds(deeds, 'DeedTypeId');
   const registers = await queryByIds(systemKey, 'LegalFactRegister', 'id', registerIds);
 
   const historyGraphRows = buildHistoryGraphRows(history, deeds, registers);
@@ -424,27 +451,52 @@ export async function lookupDeedHistoryByTitle(
     historyDeedIds,
     hasRetiredByDeedDetailId,
   );
-  const deedDetails = await queryByIds(systemKey, 'DeedDetail', 'Id', deedDetailIds);
+  const deedDetails = await queryByIds(
+    systemKey,
+    'DeedDetail',
+    tereno ? 'id' : 'Id',
+    deedDetailIds,
+  );
 
-  const parcelIds = asNumberIds(deedDetails, 'PlotId');
-  const subjectIds = asNumberIds(deedDetails, 'SubjectId');
-  const parcels = parcelIds.length > 0
-    ? await queryByIds(systemKey, 'PerceelTb', 'PerceelNummer', parcelIds)
-    : [];
-  const subjects = subjectIds.length > 0
-    ? await queryByIds(systemKey, 'Subject', 'SubjectID', subjectIds)
-    : [];
+  const parcelIds = asNumberIds(deedDetails, tereno ? 'plotId' : 'PlotId');
+  const subjectIds = asNumberIds(deedDetails, tereno ? 'subjectId' : 'SubjectId');
+  const parcels =
+    parcelIds.length > 0
+      ? await queryByIds(
+          systemKey,
+          tereno ? 'Parcel' : 'PerceelTb',
+          tereno ? 'id' : 'PerceelNummer',
+          parcelIds,
+        )
+      : [];
+  const subjects =
+    subjectIds.length > 0
+      ? await queryByIds(
+          systemKey,
+          'Subject',
+          tereno ? 'id' : 'SubjectID',
+          subjectIds,
+        )
+      : [];
   const subjectGroups =
     subjectIds.length > 0
       ? await (async () => {
           const subjectIn = buildInClause(subjectIds, 'sid');
-          return querySafe(
-            systemKey,
-            `SELECT sg.*
-             FROM Subjectgroep sg
-             WHERE sg.SubjectID IN (${subjectIn.clause})`,
-            subjectIn.params,
-          );
+          return tereno
+            ? querySafe(
+                systemKey,
+                `SELECT sg.*
+                 FROM SubjectGroup sg
+                 WHERE sg.subjectId IN (${subjectIn.clause})`,
+                subjectIn.params,
+              )
+            : querySafe(
+                systemKey,
+                `SELECT sg.*
+                 FROM Subjectgroep sg
+                 WHERE sg.SubjectID IN (${subjectIn.clause})`,
+                subjectIn.params,
+              );
         })()
       : [];
 
@@ -457,16 +509,66 @@ export async function lookupDeedHistoryByTitle(
     aRegisterIn.params,
   );
 
-  const orderDeedLinks = await queryByIds(systemKey, 'AgendaAkteGroup', 'deedId', historyDeedIds);
-  const orderProductIds = asNumberIds(orderDeedLinks, 'AgendaO_ID');
+  const orderDeedLinks = tereno
+    ? await queryByIds(systemKey, 'OrderDeed', 'deedId', historyDeedIds)
+    : await queryByIds(systemKey, 'AgendaAkteGroup', 'deedId', historyDeedIds);
+  const orderProductIds = tereno
+    ? asNumberIds(orderDeedLinks, 'orderProductId')
+    : asNumberIds(orderDeedLinks, 'AgendaO_ID');
   const orderProducts =
     orderProductIds.length > 0
-      ? await queryByIds(systemKey, 'Agenda_Opdracht', 'AgendaO_ID', orderProductIds)
+      ? await queryByIds(
+          systemKey,
+          tereno ? 'OrderProduct' : 'Agenda_Opdracht',
+          tereno ? 'id' : 'AgendaO_ID',
+          orderProductIds,
+        )
       : [];
-  const orderIds = asNumberIds(orderProducts, 'AgendaO_IDGroup');
-  const orders = orderIds.length > 0 ? await queryByIds(systemKey, 'Agenda', 'Agenda_ID', orderIds) : [];
+  const orderIds = tereno
+    ? asNumberIds(orderProducts, 'orderId')
+    : asNumberIds(orderProducts, 'AgendaO_IDGroup');
+  const orders =
+    orderIds.length > 0
+      ? await queryByIds(
+          systemKey,
+          tereno ? 'Order' : 'Agenda',
+          tereno ? 'id' : 'Agenda_ID',
+          orderIds,
+        )
+      : [];
 
   const maxDepth = history.reduce((max, node) => Math.max(max, node.depth), 0);
+
+  const deedsWithLegalFact =
+    tereno && historyDeedIds.length > 0
+      ? await (async () => {
+          const { clause, params } = buildInClause(historyDeedIds, 'hid');
+          return querySafe(
+            systemKey,
+            `SELECT d.id AS deedId,
+                    lfr.register AS register,
+                    d.[segment] AS segment,
+                    d.[number] AS number,
+                    d.legalFactId AS legalFactId,
+                    lf.code AS legalFactCode,
+                    lf.nameNl AS legalFactNameNl,
+                    CONCAT(
+                      ISNULL(lfr.register, ''),
+                      ' ',
+                      CAST(d.[segment] AS varchar(20)),
+                      '-',
+                      CAST(d.[number] AS varchar(20))
+                    ) AS title
+             FROM Deed d
+             LEFT JOIN LegalFactRegister lfr ON lfr.id = d.legalFactRegisterId
+             LEFT JOIN LegalFact lf ON lf.id = d.legalFactId
+             WHERE d.id IN (${clause})
+             ORDER BY lfr.register, d.[segment], d.[number], d.id`,
+            params,
+          );
+        })()
+      : [];
+
   const frames: TableFrame[] = [
     buildFrame(
       'seed_deeds',
@@ -476,6 +578,18 @@ export async function lookupDeedHistoryByTitle(
       seedDeeds,
       { section: 'deed_history', sectionLabel: 'Deed history' },
     ),
+    ...(tereno
+      ? [
+          buildFrame(
+            'deeds_with_legal_fact',
+            'Deeds with Type akte (LegalFact)',
+            'Deed',
+            'deedId',
+            deedsWithLegalFact,
+            { section: 'deed_history', sectionLabel: 'Deed history' },
+          ),
+        ]
+      : []),
     buildFrame(
       'deed_history_graph',
       'Deed history graph (trace backwards)',
@@ -488,15 +602,15 @@ export async function lookupDeedHistoryByTitle(
       'deed_details',
       'DeedDetail rows tied to history deeds',
       'DeedDetail',
-      'Id',
+      tereno ? 'id' : 'Id',
       deedDetails,
       { section: 'deed_history', sectionLabel: 'Deed history' },
     ),
     buildFrame(
       'history_parcels',
       'Parcels touched by history DeedDetail rows',
-      'PerceelTb',
-      'PerceelNummer',
+      tereno ? 'Parcel' : 'PerceelTb',
+      tereno ? 'id' : 'PerceelNummer',
       parcels,
       { section: 'related_records', sectionLabel: 'Related records' },
     ),
@@ -504,15 +618,15 @@ export async function lookupDeedHistoryByTitle(
       'history_subjects',
       'Subjects touched by history DeedDetail rows',
       'Subject',
-      'SubjectID',
+      tereno ? 'id' : 'SubjectID',
       subjects,
       { section: 'related_records', sectionLabel: 'Related records' },
     ),
     buildFrame(
       'history_subject_groups',
-      'Subjectgroep rows for touched subjects',
-      'Subjectgroep',
-      'Subjectgroepkey',
+      tereno ? 'SubjectGroup rows for touched subjects' : 'Subjectgroep rows for touched subjects',
+      tereno ? 'SubjectGroup' : 'Subjectgroep',
+      tereno ? 'id' : 'Subjectgroepkey',
       subjectGroups,
       { section: 'related_records', sectionLabel: 'Related records' },
     ),
@@ -526,25 +640,25 @@ export async function lookupDeedHistoryByTitle(
     ),
     buildFrame(
       'history_order_deed_links',
-      'Order deed links (AgendaAkteGroup)',
-      'AgendaAkteGroup',
-      'ID',
+      tereno ? 'Order deed links (OrderDeed)' : 'Order deed links (AgendaAkteGroup)',
+      tereno ? 'OrderDeed' : 'AgendaAkteGroup',
+      tereno ? 'id' : 'ID',
       orderDeedLinks,
       { section: 'orders', sectionLabel: 'Linked orders' },
     ),
     buildFrame(
       'history_order_products',
       'Order products for linked deeds',
-      'Agenda_Opdracht',
-      'AgendaO_ID',
+      tereno ? 'OrderProduct' : 'Agenda_Opdracht',
+      tereno ? 'id' : 'AgendaO_ID',
       orderProducts,
       { section: 'orders', sectionLabel: 'Linked orders' },
     ),
     buildFrame(
       'history_orders',
-      'Orders (Agenda) for linked deeds',
-      'Agenda',
-      'Agenda_ID',
+      tereno ? 'Orders for linked deeds' : 'Orders (Agenda) for linked deeds',
+      tereno ? 'Order' : 'Agenda',
+      tereno ? 'id' : 'Agenda_ID',
       orders,
       { section: 'orders', sectionLabel: 'Linked orders' },
     ),

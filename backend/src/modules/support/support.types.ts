@@ -93,5 +93,12 @@ export interface ParcelSupportLookup extends SupportLookupBase {
     limited_rights_details: number;
     share_details: number;
     order_links: number;
+    /** Split detection (Tereno / usp_SplitParcel_CopyFromOldParcel). */
+    split_role?: 'source' | 'result' | 'none';
+    split_flag?: boolean;
+    split_child_count?: number;
+    split_child_esris?: string[];
+    split_parent_parcel_id?: number | null;
+    split_parent_esri?: string | null;
   } | null;
 }

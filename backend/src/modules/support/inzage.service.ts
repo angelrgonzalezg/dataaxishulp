@@ -4,9 +4,11 @@ import {
   getField,
   getFieldNumber,
   getFieldString,
+  isTerenoSupportSystem,
   querySafe,
   resolveSupportSystem,
 } from './support.frames';
+import { resolveParcelSplitInfo } from './support.parcel.split';
 import {
   buildSubjectName,
   deedRef,
@@ -43,7 +45,7 @@ const TITLE_BY_VARIANT: Record<InzageObjectVariant, string> = {
   na: 'Kadastraal uittreksel (NA)',
 };
 
-/** Base SELECT for deed + deed-detail rows filtered by legal-fact type ids. */
+/** Base SELECT for deed + deed-detail rows filtered by legal-fact type ids (Kadaster). */
 function deedDetailQuery(typeIds: number[]): { sql: string; typeParams: Record<string, number> } {
   const typeParams: Record<string, number> = {};
   const placeholders = typeIds.map((id, index) => {
@@ -86,12 +88,57 @@ function deedDetailQuery(typeIds: number[]): { sql: string; typeParams: Record<s
   return { sql, typeParams };
 }
 
+/** Tereno / DLV Aruba deed-detail query (Parcel.id ↔ DeedDetail.plotId). */
+function deedDetailQueryTereno(typeIds: number[]): { sql: string; typeParams: Record<string, number> } {
+  const typeParams: Record<string, number> = {};
+  const placeholders = typeIds.map((id, index) => {
+    const key = `t${index}`;
+    typeParams[key] = id;
+    return `@${key}`;
+  });
+
+  const sql = `
+    SELECT d.id AS deedId, lfr.register AS legalFactRegister, d.segment AS segment, d.number AS number,
+           d.value AS value, d.deedDate AS deedDate, d.deedSubmissionDate AS deedSubmissionDate,
+           d.typeDescription AS deedTypeDescription,
+           n.name AS notary, lf.nameNl AS legalFactNl, lf.nameEn AS legalFactEn,
+           lf.code AS legalFactCode,
+           dd.legalFactTypeId AS legalFactTypeId, dt.description AS legalFactTypeDescription,
+           dd.subjectId AS SubjectId, dd.shareNumerator AS shareNum, dd.shareDenominator AS shareDen,
+           dd.note AS note, dd.transactionRoleId AS transactionRoleId,
+           tr.nameNe AS roleNe, tr.sectionCode AS sectionCode,
+           cur.symbol AS currency,
+           s.firstName AS firstName, s.middleName AS middleName, s.lastName AS lastName
+    FROM Deed d
+    INNER JOIN DeedDetail dd ON dd.deedId = d.id
+    LEFT JOIN LegalFactRegister lfr ON lfr.id = d.legalFactRegisterId
+    LEFT JOIN LegalFact lf ON lf.id = d.legalFactId
+    LEFT JOIN Notary n ON n.id = d.notaryId
+    LEFT JOIN LegalFactType dt ON dt.id = dd.legalFactTypeId
+    LEFT JOIN TransactionRole tr ON tr.id = dd.transactionRoleId
+    LEFT JOIN Currency cur ON cur.id = d.currencyId
+    LEFT JOIN [Subject] s ON s.id = dd.subjectId
+    WHERE dd.legalFactTypeId IN (${placeholders.join(', ')})
+      AND ISNULL(dd.isRetired, 0) = 0
+      AND dd.plotId = @parcelId
+      AND (dd.approvalId IS NULL OR dd.approvalId = @approved)
+      AND NOT EXISTS (
+        SELECT 1 FROM DeedProcedure dp
+        WHERE dp.id = dd.deedProcedureId AND dp.procedureEN = 'Termination'
+      )
+    ORDER BY d.segment, d.number, d.id`;
+
+  return { sql, typeParams };
+}
+
 async function fetchDeedDetails(
   systemKey: string,
   parcelId: number,
   typeIds: number[],
 ): Promise<Record<string, unknown>[]> {
-  const { sql, typeParams } = deedDetailQuery(typeIds);
+  const { sql, typeParams } = isTerenoSupportSystem(systemKey)
+    ? deedDetailQueryTereno(typeIds)
+    : deedDetailQuery(typeIds);
   return querySafe(systemKey, sql, { parcelId, approved: APPROVED, ...typeParams });
 }
 
@@ -194,6 +241,27 @@ async function fetchMandeligDeeds(
   parcelId: number,
   role: 'main' | 'share',
 ): Promise<Record<string, unknown>[]> {
+  if (isTerenoSupportSystem(systemKey)) {
+    const column = role === 'main' ? 'mainParcelId' : 'shareParcelId';
+    return querySafe(
+      systemKey,
+      `SELECT d.id AS deedId, lfr.register AS legalFactRegister, d.segment AS segment, d.number AS number,
+              d.deedDate AS deedDate, d.deedSubmissionDate AS deedSubmissionDate, n.name AS notary,
+              lf.nameNl AS legalFactNl, lf.nameEn AS legalFactEn
+       FROM Deed d
+       INNER JOIN DeedDetail dd ON dd.deedId = d.id
+       INNER JOIN ShareGroup mg ON mg.deedDetailId = dd.id
+       LEFT JOIN LegalFactRegister lfr ON lfr.id = d.legalFactRegisterId
+       LEFT JOIN LegalFact lf ON lf.id = d.legalFactId
+       LEFT JOIN Notary n ON n.id = d.notaryId
+       WHERE mg.${column} = @parcelId
+         AND ISNULL(mg.isRetired, 0) = 0
+         AND (mg.approvalId IS NULL OR mg.approvalId = @approved)
+       ORDER BY d.number, d.id`,
+      { parcelId, approved: APPROVED },
+    );
+  }
+
   const column = role === 'main' ? 'parcel' : 'mandelig_parcel';
   return querySafe(
     systemKey,
@@ -215,6 +283,39 @@ async function fetchMandeligMembers(
   parcelId: number,
   role: 'main' | 'share',
 ): Promise<string[]> {
+  if (isTerenoSupportSystem(systemKey)) {
+    const filterColumn = role === 'main' ? 'mainParcelId' : 'shareParcelId';
+    const joinColumn = role === 'main' ? 'shareParcelId' : 'mainParcelId';
+    const rows = await querySafe(
+      systemKey,
+      `SELECT mg.shareNumerator AS shareNum, mg.shareDenominator AS shareDen,
+              p.department AS department, p.section AS section, p.number AS number, p.esri AS esri
+       FROM ShareGroup mg
+       INNER JOIN Parcel p ON p.id = mg.${joinColumn}
+       WHERE mg.${filterColumn} = @parcelId
+         AND ISNULL(mg.isRetired, 0) = 0
+         AND (mg.approvalId IS NULL OR mg.approvalId = @approved)`,
+      { parcelId, approved: APPROVED },
+    );
+
+    return rows.map((row) => {
+      const num = getFieldNumber(row, 'shareNum');
+      const den = getFieldNumber(row, 'shareDen');
+      const share =
+        num != null && den != null && den !== 0
+          ? formatFraction(simplifyFraction(num, den))
+          : null;
+      const parts = [
+        `esri: ${getFieldString(row, 'esri') ?? '—'}`,
+        `afdeling: ${getFieldString(row, 'department') ?? '—'}`,
+        `sectie: ${getFieldString(row, 'section') ?? '—'}`,
+        `nummer: ${getFieldString(row, 'number') ?? '—'}`,
+      ];
+      if (share) parts.push(`Aandeel: ${share}`);
+      return `Kadastrale aanduiding: ${parts.join(', ')}`;
+    });
+  }
+
   const filterColumn = role === 'main' ? 'parcel' : 'mandelig_parcel';
   const joinColumn = role === 'main' ? 'mandelig_parcel' : 'parcel';
   const rows = await querySafe(
@@ -350,16 +451,31 @@ async function fetchOwnershipShareMap(
   systemKey: string,
   parcelId: number,
 ): Promise<Map<number, string>> {
-  const rows = await querySafe(
-    systemKey,
-    `SELECT dd.DeedTypeId AS legalFactTypeId, dd.SubjectId AS SubjectId,
-            dd.ShareNumerator AS shareNum, dd.ShareDenominator AS shareDen
-     FROM DeedDetail dd
-     WHERE dd.PlotId = @parcelId AND dd.DeedTypeId IN (1, 4, 8, 9)
-       AND dd.ApprovalId = @approved AND dd.IsRetired = 0
-       AND NOT EXISTS (SELECT 1 FROM DeedProcedure dp WHERE dp.Id = dd.DeedProcedureID AND dp.ProcedureEN = 'Termination')`,
-    { parcelId, approved: APPROVED },
-  );
+  const rows = isTerenoSupportSystem(systemKey)
+    ? await querySafe(
+        systemKey,
+        `SELECT dd.legalFactTypeId AS legalFactTypeId, dd.subjectId AS SubjectId,
+                dd.shareNumerator AS shareNum, dd.shareDenominator AS shareDen
+         FROM DeedDetail dd
+         WHERE dd.plotId = @parcelId AND dd.legalFactTypeId IN (1, 4, 8, 9)
+           AND ISNULL(dd.isRetired, 0) = 0
+           AND (dd.approvalId IS NULL OR dd.approvalId = @approved)
+           AND NOT EXISTS (
+             SELECT 1 FROM DeedProcedure dp
+             WHERE dp.id = dd.deedProcedureId AND dp.procedureEN = 'Termination'
+           )`,
+        { parcelId, approved: APPROVED },
+      )
+    : await querySafe(
+        systemKey,
+        `SELECT dd.DeedTypeId AS legalFactTypeId, dd.SubjectId AS SubjectId,
+                dd.ShareNumerator AS shareNum, dd.ShareDenominator AS shareDen
+         FROM DeedDetail dd
+         WHERE dd.PlotId = @parcelId AND dd.DeedTypeId IN (1, 4, 8, 9)
+           AND dd.ApprovalId = @approved AND dd.IsRetired = 0
+           AND NOT EXISTS (SELECT 1 FROM DeedProcedure dp WHERE dp.Id = dd.DeedProcedureID AND dp.ProcedureEN = 'Termination')`,
+        { parcelId, approved: APPROVED },
+      );
 
   const hasGroundLease = rows.some((row) => {
     const type = getFieldNumber(row, 'legalFactTypeId');
@@ -442,18 +558,34 @@ export async function buildObjectInzage(input: {
   const systemKey = input.systemKey?.trim() || DEFAULT_SYSTEM_KEY;
   const variant = input.variant ?? 'object';
   const system = await resolveSupportSystem(systemKey);
+  const tereno = isTerenoSupportSystem(systemKey);
 
-  const parcels = await querySafe(
-    systemKey,
-    'SELECT * FROM PerceelTb WHERE PerceelNummer = @parcelId',
-    { parcelId: input.parcelId },
-  );
+  const parcels = tereno
+    ? await querySafe(systemKey, 'SELECT * FROM Parcel WHERE id = @parcelId', {
+        parcelId: input.parcelId,
+      })
+    : await querySafe(
+        systemKey,
+        'SELECT * FROM PerceelTb WHERE PerceelNummer = @parcelId',
+        { parcelId: input.parcelId },
+      );
   if (parcels.length === 0) {
     throw new NotFoundError(`Parcel ${input.parcelId} not found in ${system.system_name}`);
   }
   const parcel = parcels[0];
 
-  const splitFlag = toBool(getField(parcel, 'VoorgenomenSplitsingIndicatie'));
+  const terenoSplit = tereno
+    ? await resolveParcelSplitInfo(
+        systemKey,
+        input.parcelId,
+        getFieldString(parcel, 'esri'),
+        getField(parcel, 'splitFlag'),
+      )
+    : null;
+
+  const splitFlag = tereno
+    ? Boolean(terenoSplit && terenoSplit.role !== 'none')
+    : toBool(getField(parcel, 'VoorgenomenSplitsingIndicatie'));
 
   const [
     ownership,
@@ -480,12 +612,58 @@ export async function buildObjectInzage(input: {
     fetchMandeligMembers(systemKey, input.parcelId, 'main'),
     fetchMandeligDeeds(systemKey, input.parcelId, 'share'),
     fetchMandeligMembers(systemKey, input.parcelId, 'share'),
-    splitFlag ? fetchSplitsing(systemKey, input.parcelId) : Promise.resolve([]),
-    fetchOldAnnotations(systemKey, input.parcelId),
+    !tereno && splitFlag ? fetchSplitsing(systemKey, input.parcelId) : Promise.resolve([]),
+    tereno ? Promise.resolve([]) : fetchOldAnnotations(systemKey, input.parcelId),
     fetchOwnershipShareMap(systemKey, input.parcelId),
   ]);
 
   const sections: InzageSection[] = [];
+
+  if (terenoSplit && terenoSplit.role !== 'none') {
+    const extraLines: string[] = [];
+    if (terenoSplit.role === 'source') {
+      extraLines.push('Deze parcel is gesplitst (bronperceel).');
+      if (terenoSplit.child_esris.length > 0) {
+        extraLines.push(`Nieuwe percelen: ${terenoSplit.child_esris.join(', ')}`);
+      }
+      if (terenoSplit.split_flag) {
+        extraLines.push('Parcel.splitFlag = 1');
+      }
+    } else if (terenoSplit.role === 'result') {
+      extraLines.push('Deze parcel is ontstaan uit een splitsing.');
+      if (terenoSplit.parent_esri) {
+        extraLines.push(
+          `Bronperceel: ${terenoSplit.parent_esri}` +
+            (terenoSplit.parent_parcel_id != null
+              ? ` (id ${terenoSplit.parent_parcel_id})`
+              : ''),
+        );
+      }
+    }
+
+    sections.push({
+      key: 'splitsing',
+      heading: 'Splitsing',
+      emptyText: null,
+      entries: [
+        {
+          parties: [],
+          legalFact: null,
+          obtainedLabel: null,
+          typeDescription:
+            terenoSplit.role === 'source' ? 'Bronperceel gesplitst' : 'Ontstaan uit splitsing',
+          deedDate: null,
+          submissionDate: null,
+          notary: null,
+          note: null,
+          amount: null,
+          deed: { register: null, segment: null, number: null },
+          extraLines,
+          sourceDeeds: [],
+        },
+      ],
+    });
+  }
 
   // Recht van Eigendom
   if (ownership.length > 0) {
@@ -696,8 +874,12 @@ export async function buildObjectInzage(input: {
   });
 
   // Opmerking (particulars)
-  const showParticulars = toBool(getField(parcel, 'PerceelBz'));
-  const particulars = getFieldString(parcel, 'PerceelBijzonderheiden');
+  const showParticulars = tereno
+    ? Boolean(getFieldString(parcel, 'particulars', 'description'))
+    : toBool(getField(parcel, 'PerceelBz'));
+  const particulars = tereno
+    ? getFieldString(parcel, 'particulars', 'description')
+    : getFieldString(parcel, 'PerceelBijzonderheiden');
   if (showParticulars && particulars) {
     sections.push({
       key: 'particulars',
@@ -739,19 +921,37 @@ export async function buildObjectInzage(input: {
     is_production: system.is_production,
     title: TITLE_BY_VARIANT[variant],
     generated_at: formatDateTime(new Date()),
-    header: {
-      parcel_id: input.parcelId,
-      esri: getFieldString(parcel, 'PerceelESRI'),
-      description: getFieldString(parcel, 'PerceelOmschrijving'),
-      size: getFieldString(parcel, 'PerceelOppervlakteHA'),
-      sheet: getFieldString(parcel, 'PerceelBlad'),
-      diamond_letter: getFieldString(parcel, 'PerceelRuitLetter'),
-      location: getFieldString(parcel, 'PerceelPlaatselijke'),
-      status: getFieldString(parcel, 'PerceelStatus'),
-      particulars: showParticulars ? particulars : null,
-      split_flag: toBool(getField(parcel, 'VoorgenomenSplitsingIndicatie')),
-      is_reviewed: toBool(getField(parcel, 'isReviewed')),
-    },
+    header: tereno
+      ? {
+          parcel_id: input.parcelId,
+          esri: getFieldString(parcel, 'esri'),
+          description: getFieldString(parcel, 'description'),
+          size: getFieldString(parcel, 'size'),
+          sheet: getFieldString(parcel, 'sheet'),
+          diamond_letter: getFieldString(parcel, 'diamondLetter'),
+          location: getFieldString(parcel, 'location'),
+          status: getFieldString(parcel, 'status'),
+          particulars: showParticulars ? particulars : null,
+          split_flag: Boolean(terenoSplit?.split_flag || (terenoSplit && terenoSplit.role !== 'none')),
+          is_reviewed: toBool(getField(parcel, 'isReviewed')),
+          split_role: terenoSplit?.role ?? 'none',
+          split_child_esris: terenoSplit?.child_esris ?? [],
+          split_parent_esri: terenoSplit?.parent_esri ?? null,
+          split_parent_parcel_id: terenoSplit?.parent_parcel_id ?? null,
+        }
+      : {
+          parcel_id: input.parcelId,
+          esri: getFieldString(parcel, 'PerceelESRI'),
+          description: getFieldString(parcel, 'PerceelOmschrijving'),
+          size: getFieldString(parcel, 'PerceelOppervlakteHA'),
+          sheet: getFieldString(parcel, 'PerceelBlad'),
+          diamond_letter: getFieldString(parcel, 'PerceelRuitLetter'),
+          location: getFieldString(parcel, 'PerceelPlaatselijke'),
+          status: getFieldString(parcel, 'PerceelStatus'),
+          particulars: showParticulars ? particulars : null,
+          split_flag: toBool(getField(parcel, 'VoorgenomenSplitsingIndicatie')),
+          is_reviewed: toBool(getField(parcel, 'isReviewed')),
+        },
     sections,
     linked_subjects: [...linkedSubjects.entries()].map(([subject_id, name]) => ({
       subject_id,

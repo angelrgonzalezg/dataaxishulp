@@ -7,6 +7,10 @@ export async function fetchSystems() {
 }
 
 export async function testSystem(id: number) {
-  const { data } = await api.post(`/systems/${id}/test`);
+  // Use {} — posting `null` with Content-Type application/json sends the
+  // literal body "null" and breaks JSON parsing in some layers.
+  const { data } = await api.post(`/systems/${id}/test`, {}, {
+    timeout: 20000,
+  });
   return data.data as SystemConnection;
 }

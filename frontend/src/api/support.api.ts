@@ -1,5 +1,12 @@
 import { api } from './client';
-import type { DeedHistorySupportLookup, OrderSupportLookup, ParcelSupportLookup } from '@/types';
+import type {
+  DeedHistorySupportLookup,
+  DeedLegalFactState,
+  LegalFactOption,
+  OrderSupportLookup,
+  ParcelSupportLookup,
+  UpdateDeedLegalFactResult,
+} from '@/types';
 
 export async function fetchOrderSupport(orderId: number, systemKey: string) {
   const { data } = await api.get(`/support/orders/${orderId}`, {
@@ -41,4 +48,26 @@ export async function fetchParcelSupportByMeetBrief(meetBrief: string, systemKey
     params: { meetBrief, systemKey },
   });
   return data.data as ParcelSupportLookup;
+}
+
+export async function fetchLegalFacts(systemKey: string) {
+  const { data } = await api.get('/support/legal-facts', {
+    params: { systemKey },
+  });
+  return data.data as LegalFactOption[];
+}
+
+export async function fetchDeedLegalFact(deedId: number, systemKey: string) {
+  const { data } = await api.get(`/support/deeds/${deedId}/legal-fact`, {
+    params: { systemKey },
+  });
+  return data.data as DeedLegalFactState;
+}
+
+export async function updateDeedLegalFact(
+  deedId: number,
+  payload: { systemKey: string; legalFactId: number; confirm: true },
+) {
+  const { data } = await api.post(`/support/deeds/${deedId}/legal-fact`, payload);
+  return data.data as UpdateDeedLegalFactResult;
 }

@@ -1,8 +1,9 @@
 import sql from 'mssql';
-import sqlNative from 'mssql/msnodesqlv8';
 
 const DEFAULT_CONNECTION_TIMEOUT_MS = 8000;
-const DEFAULT_REQUEST_TIMEOUT_MS = 15000;
+const DEFAULT_REQUEST_TIMEOUT_MS = 10000;
+/** Hard ceiling so UI/API never hang when the driver ignores its own timeout. */
+const HARD_CONNECT_TIMEOUT_MS = 12000;
 
 export interface ParsedSqlServerUrl {
   server: string;
@@ -14,6 +15,8 @@ export interface ParsedSqlServerUrl {
   trustServerCertificate: boolean;
   integrated: boolean;
 }
+
+type MssqlDriver = typeof sql;
 
 /**
  * Parses Prisma/SQL Server URL style:
@@ -53,8 +56,18 @@ export function parseSqlServerUrl(url: string): ParsedSqlServerUrl {
   };
 }
 
+/**
+ * Lazily load msnodesqlv8 only for Windows/local auth.
+ * Importing it at module top-level pollutes `mssql` Request and breaks Azure/Tedious
+ * with: "connection.queryRaw is not a function".
+ */
+function loadNativeDriver(): MssqlDriver {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  return require('mssql/msnodesqlv8') as MssqlDriver;
+}
+
 export function buildMssqlConfig(url: string): {
-  driver: typeof sql | typeof sqlNative;
+  driver: MssqlDriver;
   config: sql.config;
   summary: string;
 } {
@@ -63,8 +76,15 @@ export function buildMssqlConfig(url: string): {
   const server = parsed.port ? `${parsed.server},${parsed.port}` : parsed.server;
   const trust = parsed.trustServerCertificate ? 'yes' : 'no';
   const encrypt = parsed.encrypt ? 'yes' : 'no';
+  const isAzure = parsed.server.toLowerCase().includes('.database.windows.net');
 
-  if (parsed.integrated || (process.platform === 'win32' && parsed.user && parsed.password)) {
+  // Prefer Tedious for Azure SQL. Keep ODBC for local Windows auth / on-prem SQL auth on win32.
+  const useNative =
+    parsed.integrated ||
+    (process.platform === 'win32' && Boolean(parsed.user && parsed.password) && !isAzure);
+
+  if (useNative) {
+    const sqlNative = loadNativeDriver();
     const connectionString = parsed.integrated
       ? [
           'Driver={ODBC Driver 18 for SQL Server}',
@@ -89,7 +109,6 @@ export function buildMssqlConfig(url: string): {
     return {
       driver: sqlNative,
       summary,
-      // msnodesqlv8 uses top-level connectionString (not modeled on sql.config).
       config: {
         server: parsed.server,
         connectionString,
@@ -99,22 +118,26 @@ export function buildMssqlConfig(url: string): {
     };
   }
 
+  // Azure SQL: encrypt required; validate Azure cert (trustServerCertificate=false).
   return {
     driver: sql,
     summary,
     config: {
       server: parsed.server,
-      port: parsed.port,
       database: parsed.database,
       user: parsed.user,
       password: parsed.password,
       options: {
-        encrypt: parsed.encrypt,
-        trustServerCertificate: parsed.trustServerCertificate,
+        encrypt: true,
+        trustServerCertificate: false,
         connectTimeout: DEFAULT_CONNECTION_TIMEOUT_MS,
+        enableArithAbort: true,
+        ...(isAzure ? {} : { port: parsed.port }),
       },
+      ...(isAzure ? {} : { port: parsed.port }),
       connectionTimeout: DEFAULT_CONNECTION_TIMEOUT_MS,
       requestTimeout: DEFAULT_REQUEST_TIMEOUT_MS,
+      pool: { max: 1, min: 0, idleTimeoutMillis: 1000 },
     },
   };
 }
@@ -125,18 +148,28 @@ function formatConnectionError(error: unknown): string {
     if (original instanceof Error && original.message && original.message !== '[object Object]') {
       return original.message;
     }
-    if (original && typeof original === 'object' && 'message' in original) {
-      const nested = String((original as { message?: unknown }).message ?? '');
-      if (nested && nested !== '[object Object]') return nested;
+    if (original && typeof original === 'object') {
+      const nested = original as {
+        message?: unknown;
+        code?: unknown;
+        info?: { message?: unknown };
+      };
+      const fromInfo = nested.info?.message != null ? String(nested.info.message) : '';
+      if (fromInfo && fromInfo !== '[object Object]') return fromInfo;
+      const nestedMsg = nested.message != null ? String(nested.message) : '';
+      if (nestedMsg && nestedMsg !== '[object Object]') return nestedMsg;
+      if (nested.code != null) return `ConnectionError code=${String(nested.code)}`;
     }
     if (error.message && error.message !== '[object Object]') return error.message;
   }
   if (typeof error === 'string') return error;
   try {
-    return JSON.stringify(error);
+    const text = JSON.stringify(error);
+    if (text && text !== '{}' && text !== '{"name":"ConnectionError"}') return text;
   } catch {
-    return 'Connection failed';
+    // ignore
   }
+  return 'Connection failed (no details from driver). Check user/password, VPN, and Azure firewall.';
 }
 
 async function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
@@ -159,16 +192,22 @@ async function withTimeout<T>(promise: Promise<T>, ms: number, label: string): P
   }
 }
 
+async function closePoolQuietly(pool: sql.ConnectionPool | null): Promise<void> {
+  if (!pool) return;
+  try {
+    await withTimeout(pool.close(), 2000, 'Close pool');
+  } catch {
+    // Ignore close failures / hangs after a timed-out connect.
+  }
+}
+
 export async function testSqlServerConnection(url: string): Promise<{ ok: boolean; error?: string }> {
   let pool: sql.ConnectionPool | null = null;
   const { driver, config, summary } = buildMssqlConfig(url);
 
   try {
-    pool = await withTimeout(
-      new driver.ConnectionPool(config).connect(),
-      DEFAULT_CONNECTION_TIMEOUT_MS + 1000,
-      `Connect ${summary}`,
-    );
+    pool = new driver.ConnectionPool(config);
+    await withTimeout(pool.connect(), HARD_CONNECT_TIMEOUT_MS, `Connect ${summary}`);
     await withTimeout(
       pool.request().query('SELECT 1 AS ok'),
       DEFAULT_REQUEST_TIMEOUT_MS,
@@ -179,9 +218,7 @@ export async function testSqlServerConnection(url: string): Promise<{ ok: boolea
     const message = formatConnectionError(error);
     return { ok: false, error: `${summary}: ${message}` };
   } finally {
-    if (pool) {
-      await pool.close().catch(() => undefined);
-    }
+    await closePoolQuietly(pool);
   }
 }
 

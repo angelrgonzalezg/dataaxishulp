@@ -1,10 +1,12 @@
 import { NotFoundError, ValidationError } from '../../utils/AppError';
+import { querySystem } from '../../utils/externalDb';
 import {
   DEFAULT_SYSTEM_KEY,
   asNumberIds,
   buildFrame,
   getFieldNumber,
   getFieldString,
+  isTerenoSupportSystem,
   queryByIds,
   querySafe,
   resolveSupportSystem,
@@ -337,18 +339,22 @@ export async function lookupOrderByRegisterTitle(
   const systemKey = systemKeyInput?.trim() || DEFAULT_SYSTEM_KEY;
   const system = await resolveSupportSystem(systemKey);
 
-  const deeds = await querySafe(
+  const registerFk = isTerenoSupportSystem(systemKey)
+    ? 'legalFactRegisterId'
+    : 'DeedTypeId';
+
+  const deeds = await querySystem(
     systemKey,
     `SELECT d.*
      FROM Deed d
-     INNER JOIN LegalFactRegister lfr ON lfr.id = d.DeedTypeId
-     WHERE UPPER(LTRIM(RTRIM(lfr.register))) = @register
-       AND d.Segment = @segment
-       AND d.Number = @number`,
+     INNER JOIN LegalFactRegister lfr ON lfr.id = d.${registerFk}
+     WHERE UPPER(LTRIM(RTRIM(lfr.register))) = @registerCode
+       AND d.[segment] = @deedSegment
+       AND d.[number] = @deedNumber`,
     {
-      register: parsed.register,
-      segment: parsed.segment,
-      number: parsed.number,
+      registerCode: parsed.register,
+      deedSegment: parsed.segment,
+      deedNumber: parsed.number,
     },
   );
 
@@ -366,7 +372,9 @@ export async function lookupOrderByRegisterTitle(
     const frames: TableFrame[] = [
       buildFrame('deeds', 'Deeds', 'Deed', 'id', deeds),
     ];
-    const registerIds = asNumberIds(deeds, 'DeedTypeId');
+    const registerIds = isTerenoSupportSystem(systemKey)
+      ? asNumberIds(deeds, 'legalFactRegisterId')
+      : asNumberIds(deeds, 'DeedTypeId');
     const registers = await queryByIds(systemKey, 'LegalFactRegister', 'id', registerIds);
     frames.push(
       buildFrame('legal_fact_registers', 'Legal fact registers', 'LegalFactRegister', 'id', registers),

@@ -12,6 +12,11 @@ import {
 } from './support.service';
 import { lookupParcel } from './support.parcel.service';
 import { lookupDeedHistoryByTitle } from './support.deed.service';
+import {
+  getDeedLegalFact,
+  listLegalFacts,
+  updateDeedLegalFact,
+} from './support.deed.mutate.service';
 import { buildObjectInzage } from './inzage.service';
 import { buildSubjectInzage } from './inzage.subject.service';
 import type { InzageObjectVariant, InzageSubjectVariant } from './inzage.types';
@@ -41,6 +46,16 @@ const parcelQuerySchema = z.object({
   meetBrief: z.string().min(1).optional(),
   parcelId: z.coerce.number().int().positive().optional(),
   systemKey: z.string().min(1).optional(),
+});
+
+const deedParamsSchema = z.object({
+  deedId: z.coerce.number().int().positive(),
+});
+
+const updateDeedLegalFactSchema = z.object({
+  systemKey: z.string().min(1),
+  legalFactId: z.coerce.number().int().positive(),
+  confirm: z.literal(true),
 });
 
 router.get(
@@ -201,6 +216,61 @@ router.get(
       }
 
       const data = await lookupDeedHistoryByTitle(title, systemKey);
+      res.json(successResponse(data));
+    } catch (error) {
+      next(error);
+    }
+  },
+);
+
+router.get(
+  '/legal-facts',
+  requirePermission('support.view'),
+  validate(systemKeySchema, 'query'),
+  async (req, res, next) => {
+    try {
+      const systemKey =
+        (req.query.systemKey as string | undefined)?.trim() || DEFAULT_SYSTEM_KEY;
+      const data = await listLegalFacts(systemKey);
+      res.json(successResponse(data));
+    } catch (error) {
+      next(error);
+    }
+  },
+);
+
+router.get(
+  '/deeds/:deedId/legal-fact',
+  requirePermission('support.view'),
+  validate(deedParamsSchema, 'params'),
+  validate(systemKeySchema, 'query'),
+  async (req, res, next) => {
+    try {
+      const systemKey =
+        (req.query.systemKey as string | undefined)?.trim() || DEFAULT_SYSTEM_KEY;
+      const data = await getDeedLegalFact(Number(req.params.deedId), systemKey);
+      res.json(successResponse(data));
+    } catch (error) {
+      next(error);
+    }
+  },
+);
+
+router.post(
+  '/deeds/:deedId/legal-fact',
+  requirePermission('support.edit'),
+  validate(deedParamsSchema, 'params'),
+  validate(updateDeedLegalFactSchema, 'body'),
+  async (req, res, next) => {
+    try {
+      const body = req.body as z.infer<typeof updateDeedLegalFactSchema>;
+      const data = await updateDeedLegalFact({
+        deedId: Number(req.params.deedId),
+        systemKey: body.systemKey,
+        legalFactId: body.legalFactId,
+        confirm: body.confirm,
+        updatedBy: req.user?.username ?? 'dataaxis-hulp',
+      });
       res.json(successResponse(data));
     } catch (error) {
       next(error);

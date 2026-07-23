@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
+import { ChangeTypeAkteTool } from '@/components/support/ChangeTypeAkteTool';
 import { ProductionEnvironmentBanner } from '@/components/support/ProductionEnvironmentBanner';
 import { TableFrameCard } from '@/components/support/TableFrameCard';
 import { extractErrorMessage } from '@/api/client';
@@ -19,7 +20,7 @@ import {
   useParcelSupportByMeetBrief,
 } from '@/hooks/useSupport';
 import { useSystems } from '@/hooks/useSystems';
-import type { SupportLookup, TableFrame } from '@/types';
+import type { DeedTypeAkteOption, SupportLookup, TableFrame } from '@/types';
 
 const SYSTEM_STORAGE_KEY = 'dataaxis-hulp-support-system';
 
@@ -30,6 +31,65 @@ type EntryMode =
   | 'deed_history'
   | 'parcel_number'
   | 'meet_brief';
+
+function isTerenoSupportSystem(systemKey: string): boolean {
+  const key = systemKey.toLowerCase();
+  return key.startsWith('dlv_') || key.includes('tereno') || key.includes('aruba');
+}
+
+function asNullableNumber(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string' && value.trim() !== '') {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
+
+function asNullableString(value: unknown): string | null {
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    return trimmed.length > 0 ? trimmed : null;
+  }
+  if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+  return null;
+}
+
+function extractDeedTypeAkteOptions(frames: TableFrame[] | undefined): DeedTypeAkteOption[] {
+  if (!frames?.length) return [];
+  const frame =
+    frames.find((item) => item.key === 'deeds_with_legal_fact') ??
+    frames.find((item) => item.key === 'seed_deeds' || item.key === 'deeds');
+  if (!frame) return [];
+
+  const seen = new Set<number>();
+  const options: DeedTypeAkteOption[] = [];
+
+  for (const row of frame.rows) {
+    const deedId =
+      asNullableNumber(row.deedId) ??
+      asNullableNumber(row.id) ??
+      asNullableNumber(row.Id);
+    if (deedId == null || deedId <= 0 || seen.has(deedId)) continue;
+    seen.add(deedId);
+
+    const register = asNullableString(row.register);
+    const segment = asNullableString(row.segment);
+    const number = asNullableString(row.number);
+    const titleFromParts =
+      register && segment && number ? `${register} ${segment}-${number}` : null;
+
+    options.push({
+      deedId,
+      title: asNullableString(row.title) ?? titleFromParts ?? `#${deedId}`,
+      legalFactId: asNullableNumber(row.legalFactId),
+      legalFactCode: asNullableString(row.legalFactCode),
+      legalFactNameNl: asNullableString(row.legalFactNameNl),
+    });
+  }
+
+  return options;
+}
 
 function groupFrames(frames: TableFrame[]) {
   const groups: Array<{ key: string; label: string; frames: TableFrame[] }> = [];
@@ -140,6 +200,11 @@ export function SupportCenterPage() {
 
   const frameGroups = useMemo(
     () => (data?.frames ? groupFrames(data.frames) : []),
+    [data?.frames],
+  );
+
+  const deedTypeAkteOptions = useMemo(
+    () => extractDeedTypeAkteOptions(data?.frames),
     [data?.frames],
   );
 
@@ -273,12 +338,18 @@ export function SupportCenterPage() {
               ? '12255'
               : '0/1949';
 
-  const isProduction = selectedSystem?.is_production ?? false;
+  const isProduction = selectedSystem?.is_production ?? data?.is_production ?? false;
   const isOrderLikeEntry =
     data?.entry === 'order' || data?.entry === 'kenmerk' || data?.entry === 'register_deed';
   const isDeedHistoryEntry = data?.entry === 'deed_history';
   const isParcelLikeEntry =
     data?.entry === 'parcel_number' || data?.entry === 'meet_brief';
+  const showResolutionTools =
+    Boolean(data?.found) &&
+    Boolean(activeSystemKey) &&
+    isTerenoSupportSystem(activeSystemKey ?? '') &&
+    (isParcelLikeEntry || isDeedHistoryEntry) &&
+    deedTypeAkteOptions.length > 0;
 
   return (
     <div className="-mx-8 -mt-8">
@@ -369,6 +440,15 @@ export function SupportCenterPage() {
         <Card className="p-8 text-center text-sm text-ink-500">{t('common.loading')}</Card>
       )}
 
+      {showResolutionTools && selectedSystem && (
+        <ChangeTypeAkteTool
+          systemKey={selectedSystem.system_key}
+          isProduction={isProduction}
+          systemName={selectedSystem.name}
+          deeds={deedTypeAkteOptions}
+        />
+      )}
+
       {isOrderLikeEntry && data && data.summary && (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <Card className="p-4">
@@ -440,7 +520,7 @@ export function SupportCenterPage() {
       )}
 
       {isParcelLikeEntry && data && data.summary && (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
           <Card className="p-4">
             <p className="text-xs font-semibold uppercase text-ink-400">{t('support.parcelId')}</p>
             <p className="mt-1 text-xl font-extrabold text-ink-900">{data.parcel_id}</p>
@@ -473,6 +553,31 @@ export function SupportCenterPage() {
               {data.summary.order_links} {t('support.orderLinks')}
             </p>
             <p className="text-xs text-ink-500">{data.summary.status ?? '—'}</p>
+          </Card>
+          <Card
+            className={`p-4 ${
+              data.summary.split_role && data.summary.split_role !== 'none'
+                ? 'border-amber-300 bg-amber-50'
+                : ''
+            }`}
+          >
+            <p className="text-xs font-semibold uppercase text-ink-400">{t('support.split')}</p>
+            <p className="mt-1 text-sm font-semibold text-ink-900">
+              {data.summary.split_role === 'source'
+                ? t('support.splitSource')
+                : data.summary.split_role === 'result'
+                  ? t('support.splitResult')
+                  : t('support.splitNone')}
+            </p>
+            <p className="text-xs text-ink-500">
+              {data.summary.split_role === 'source'
+                ? `${t('support.splitChildren')}: ${(data.summary.split_child_esris ?? []).join(', ') || '—'}`
+                : data.summary.split_role === 'result'
+                  ? `${t('support.splitParent')}: ${data.summary.split_parent_esri ?? '—'} (#${data.summary.split_parent_parcel_id ?? '—'})`
+                  : data.summary.split_flag
+                    ? 'splitFlag=1'
+                    : '—'}
+            </p>
           </Card>
         </div>
       )}

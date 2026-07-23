@@ -57,6 +57,11 @@ export interface InzageObjectHeader {
   particulars: string | null;
   split_flag: boolean;
   is_reviewed: boolean;
+  /** Tereno split detection via ParcelHistoryLink. */
+  split_role?: 'source' | 'result' | 'none';
+  split_child_esris?: string[];
+  split_parent_esri?: string | null;
+  split_parent_parcel_id?: number | null;
 }
 
 export interface InzageObjectReport {

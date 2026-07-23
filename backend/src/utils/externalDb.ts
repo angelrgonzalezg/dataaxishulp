@@ -85,11 +85,11 @@ export async function getSystemPool(systemKey: string): Promise<ConnectionPool> 
   }
 }
 
-export async function querySystem<T extends Record<string, unknown> = Record<string, unknown>>(
+async function runSystemQuery<T extends Record<string, unknown> = Record<string, unknown>>(
   systemKey: string,
   queryText: string,
   params: Record<string, unknown> = {},
-): Promise<T[]> {
+): Promise<{ rows: T[]; rowsAffected: number }> {
   try {
     const pool = await getSystemPool(systemKey);
     const request = pool.request();
@@ -99,7 +99,10 @@ export async function querySystem<T extends Record<string, unknown> = Record<str
     }
 
     const result = await request.query<T>(queryText);
-    return result.recordset ?? [];
+    const affected = Array.isArray(result.rowsAffected)
+      ? result.rowsAffected.reduce((sum, n) => sum + (Number(n) || 0), 0)
+      : Number(result.rowsAffected ?? 0);
+    return { rows: result.recordset ?? [], rowsAffected: affected };
   } catch (error) {
     if (error instanceof AppError) throw error;
     if (isConnectionError(error)) {
@@ -117,6 +120,25 @@ export async function querySystem<T extends Record<string, unknown> = Record<str
     }
     throw error;
   }
+}
+
+export async function querySystem<T extends Record<string, unknown> = Record<string, unknown>>(
+  systemKey: string,
+  queryText: string,
+  params: Record<string, unknown> = {},
+): Promise<T[]> {
+  const { rows } = await runSystemQuery<T>(systemKey, queryText, params);
+  return rows;
+}
+
+/** Execute a write statement (UPDATE/INSERT/DELETE) against a connected system DB. */
+export async function executeSystem(
+  systemKey: string,
+  queryText: string,
+  params: Record<string, unknown> = {},
+): Promise<{ rowsAffected: number }> {
+  const { rowsAffected } = await runSystemQuery(systemKey, queryText, params);
+  return { rowsAffected };
 }
 
 export function serializeRow(row: Record<string, unknown>): Record<string, unknown> {
