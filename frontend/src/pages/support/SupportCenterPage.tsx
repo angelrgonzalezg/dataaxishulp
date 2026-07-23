@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { LifeBuoy, Search } from 'lucide-react';
+import { FileText, LifeBuoy, Search } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { Input } from '@/components/ui/Input';
@@ -51,6 +52,7 @@ function groupFrames(frames: TableFrame[]) {
 
 export function SupportCenterPage() {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const { data: systems } = useSystems();
   const activeSystems = useMemo(
     () => (systems ?? []).filter((system) => system.is_active && system.has_connection_url),
@@ -473,6 +475,32 @@ export function SupportCenterPage() {
             <p className="text-xs text-ink-500">{data.summary.status ?? '—'}</p>
           </Card>
         </div>
+      )}
+
+      {isParcelLikeEntry && data && data.parcel_id > 0 && (
+        <Card className="flex flex-col gap-3 p-5 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-start gap-3">
+            <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-brand-50 text-brand-600">
+              <FileText style={{ width: 20, height: 20 }} />
+            </span>
+            <div>
+              <p className="text-sm font-bold text-ink-900">{t('inzage.generateTitle')}</p>
+              <p className="text-sm text-ink-500">{t('inzage.generateHint')}</p>
+            </div>
+          </div>
+          <Button
+            onClick={() =>
+              navigate(
+                `/support/inzage?parcelId=${data.parcel_id}&systemKey=${encodeURIComponent(
+                  activeSystemKey ?? '',
+                )}&variant=object`,
+              )
+            }
+          >
+            <FileText style={{ width: 18, height: 18 }} />
+            {t('inzage.generate')}
+          </Button>
+        </Card>
       )}
 
       {isOrderLikeEntry && data && data.candidates && data.candidates.length > 1 && (

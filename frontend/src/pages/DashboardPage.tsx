@@ -5,13 +5,17 @@ import {
   AlertTriangle,
   CheckCircle2,
   Database,
+  ExternalLink,
   LayoutList,
   Loader2,
+  RefreshCw,
   ShieldAlert,
 } from 'lucide-react';
+import { Button } from '@/components/ui/Button';
 import { Card, CardHeader } from '@/components/ui/Card';
 import { useAuth } from '@/hooks/useAuth';
 import { useDashboardOverview } from '@/hooks/useDashboard';
+import { mondayBoardBarColor } from '@/lib/mondayBoardThemes';
 
 function StatCard({
   icon,
@@ -44,7 +48,8 @@ function StatCard({
 export function DashboardPage() {
   const { t } = useTranslation();
   const { user } = useAuth();
-  const { data, isLoading, isError } = useDashboardOverview();
+  const { data, isLoading, isError, refetch, isFetching } = useDashboardOverview();
+  const monday = data?.monday;
 
   return (
     <div className="mx-auto max-w-6xl space-y-6">
@@ -112,6 +117,93 @@ export function DashboardPage() {
             />
           </div>
 
+          {monday?.configured && (
+            <Card>
+              <div className="flex flex-col gap-3 border-b border-ink-100 px-6 py-4 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <h3 className="flex items-center gap-2 text-base font-extrabold text-ink-900">
+                    <ExternalLink style={{ width: 20, height: 20 }} className="text-brand-600" />
+                    {t('dashboard.monday.title')}
+                  </h3>
+                  <p className="mt-1 text-sm text-ink-500">
+                    {t('dashboard.monday.subtitle')}
+                    {monday.workspace ? ` · ${monday.workspace}` : ''}
+                    {monday.last_synced_at && (
+                      <>
+                        {' '}
+                        · {t('dashboard.monday.lastSynced')}{' '}
+                        {new Date(monday.last_synced_at).toLocaleString()}
+                      </>
+                    )}
+                  </p>
+                </div>
+                <div className="flex shrink-0 items-center gap-2">
+                  <Link to="/issues?tab=monday">
+                    <Button variant="secondary" size="sm">
+                      {t('dashboard.monday.viewInbox')}
+                    </Button>
+                  </Link>
+                  <Button variant="secondary" size="sm" loading={isFetching} onClick={() => refetch()}>
+                    <RefreshCw style={{ width: 14, height: 14 }} />
+                    {t('dashboard.monday.refresh')}
+                  </Button>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4 p-6 lg:grid-cols-4">
+                <div>
+                  <p className="text-2xl font-extrabold text-amber-600">{monday.totals.open}</p>
+                  <p className="text-sm text-ink-600">{t('dashboard.monday.open')}</p>
+                </div>
+                <div>
+                  <p className="text-2xl font-extrabold text-emerald-600">{monday.totals.done}</p>
+                  <p className="text-sm text-ink-600">{t('dashboard.monday.done')}</p>
+                </div>
+                <div>
+                  <p className="text-2xl font-extrabold text-ink-900">{monday.totals.total}</p>
+                  <p className="text-sm text-ink-600">{t('dashboard.monday.total')}</p>
+                </div>
+                <div>
+                  <p className="text-2xl font-extrabold text-brand-600">{monday.totals.imported_local}</p>
+                  <p className="text-sm text-ink-600">{t('dashboard.monday.imported')}</p>
+                </div>
+              </div>
+
+              {monday.by_board.length > 0 && (
+                <div className="space-y-3 border-t border-ink-100 px-6 pb-6 pt-4">
+                  <p className="text-xs font-bold uppercase tracking-wide text-ink-500">
+                    {t('dashboard.monday.byBoard')}
+                  </p>
+                  {monday.by_board.map((board) => (
+                    <div key={board.board_key}>
+                      <div className="flex items-center justify-between gap-4 text-sm">
+                        <span className="font-medium text-ink-700">{board.label}</span>
+                        <span className="shrink-0 text-ink-500">
+                          {board.open} {t('issues.monday.openItems')} · {board.done} Done · {board.total}{' '}
+                          total
+                        </span>
+                      </div>
+                      <div className="mt-1.5 flex h-2 w-full overflow-hidden rounded-full bg-ink-100">
+                        <div
+                          className={`h-full ${mondayBoardBarColor(board.board_key)}`}
+                          style={{
+                            width: `${Math.min(100, (board.open / Math.max(board.total, 1)) * 100)}%`,
+                          }}
+                        />
+                        <div
+                          className="h-full bg-emerald-300"
+                          style={{
+                            width: `${Math.min(100, (board.done / Math.max(board.total, 1)) * 100)}%`,
+                          }}
+                        />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </Card>
+          )}
+
           <div className="grid gap-6 lg:grid-cols-2">
             <Card>
               <CardHeader title={t('dashboard.recent')} icon={<AlertTriangle style={{ width: 20, height: 20 }} />} />
@@ -126,7 +218,14 @@ export function DashboardPage() {
                       className="flex items-center justify-between gap-4 px-6 py-4 hover:bg-ink-50/70"
                     >
                       <div className="min-w-0">
-                        <p className="truncate font-semibold text-ink-900">{issue.title}</p>
+                        <div className="flex items-center gap-2">
+                          <p className="truncate font-semibold text-ink-900">{issue.title}</p>
+                          {issue.source === 'monday' && (
+                            <span className="shrink-0 rounded-full bg-violet-50 px-2 py-0.5 text-[10px] font-bold uppercase text-violet-700">
+                              Monday
+                            </span>
+                          )}
+                        </div>
                         <p className="text-xs text-ink-500">
                           {issue.system_name} · {t(`issues.statuses.${issue.status}`, { defaultValue: issue.status })}
                         </p>

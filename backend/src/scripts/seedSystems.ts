@@ -55,6 +55,24 @@ const systems = [
     port: 1433,
     databaseName: 'Kadaster-BDMigration',
   },
+  {
+    systemKey: 'dlv_aruba',
+    name: 'DLV Aruba (Local)',
+    description: 'Local Tereno / DLV test database (tereno_dev_AG_local)',
+    envVarName: 'SYSTEM_DB_DLV_ARUBA_URL',
+    host: 'localhost',
+    port: 1433,
+    databaseName: 'tereno_dev_AG_local',
+  },
+  {
+    systemKey: 'dlv_aruba_prod',
+    name: 'DLV Aruba (PROD)',
+    description: 'Production DLV / Tereno Aruba (Azure SQL — requires VPN)',
+    envVarName: 'SYSTEM_DB_DLV_ARUBA_PROD_URL',
+    host: 'sql-tereno-dev.database.windows.net',
+    port: 1433,
+    databaseName: 'sqldb-tereno-dev',
+  },
 ];
 
 async function seedSystems(): Promise<void> {

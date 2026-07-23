@@ -4,7 +4,9 @@ import { ProtectedRoute } from '@/components/ProtectedRoute';
 import { RequirePermission } from '@/components/RequirePermission';
 import { LoginPage } from '@/pages/LoginPage';
 import { DashboardPage } from '@/pages/DashboardPage';
+import { StatusWallPage } from '@/pages/StatusWallPage';
 import { SupportCenterPage } from '@/pages/support/SupportCenterPage';
+import { InzageReportPage } from '@/pages/support/InzageReportPage';
 import { IssuesListPage } from '@/pages/issues/IssuesListPage';
 import { IssueCreatePage } from '@/pages/issues/IssueCreatePage';
 import { IssueDetailPage } from '@/pages/issues/IssueDetailPage';
@@ -31,6 +33,15 @@ const router = createBrowserRouter([
             handle: { titleKey: 'route.dashboard.title', subtitleKey: 'route.dashboard.subtitle' },
           },
           {
+            path: '/status-wall',
+            element: (
+              <RequirePermission permission="dashboard.view">
+                <StatusWallPage />
+              </RequirePermission>
+            ),
+            handle: { titleKey: 'route.statusWall.title', subtitleKey: 'route.statusWall.subtitle' },
+          },
+          {
             path: '/support',
             element: (
               <RequirePermission permission="support.view">
@@ -38,6 +49,15 @@ const router = createBrowserRouter([
               </RequirePermission>
             ),
             handle: { titleKey: 'route.support.title', subtitleKey: 'route.support.subtitle' },
+          },
+          {
+            path: '/support/inzage',
+            element: (
+              <RequirePermission permission="support.view">
+                <InzageReportPage />
+              </RequirePermission>
+            ),
+            handle: { titleKey: 'route.inzage.title', subtitleKey: 'route.inzage.subtitle' },
           },
           {
             path: '/issues',

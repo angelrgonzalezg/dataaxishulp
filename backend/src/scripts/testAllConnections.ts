@@ -2,10 +2,9 @@ import 'dotenv/config';
 import net from 'net';
 import path from 'path';
 import { spawn } from 'child_process';
-import { fileURLToPath } from 'url';
 import { parseSqlServerUrl, testSqlServerConnection } from '../utils/systemConnection';
 
-const scriptDir = path.dirname(fileURLToPath(import.meta.url));
+const scriptDir = __dirname;
 const singleTestScript = path.join(scriptDir, 'testSingleConnection.ts');
 
 const targets = [
@@ -13,9 +12,11 @@ const targets = [
   { label: 'Kadaster Statia (Local)', envVar: 'SYSTEM_DB_KADASTER_STATIA_URL' },
   { label: 'Kadaster Saba (Local)', envVar: 'SYSTEM_DB_KADASTER_SABA_URL' },
   { label: 'Kadaster Bonaire (Local)', envVar: 'SYSTEM_DB_KADASTER_BONAIRE_URL' },
+  { label: 'DLV Aruba (Local)', envVar: 'SYSTEM_DB_DLV_ARUBA_URL' },
   { label: 'Kadaster Statia (PROD)', envVar: 'SYSTEM_DB_KADASTER_STATIA_PROD_URL' },
   { label: 'Kadaster Saba (PROD)', envVar: 'SYSTEM_DB_KADASTER_SABA_PROD_URL' },
   { label: 'Kadaster Bonaire (PROD)', envVar: 'SYSTEM_DB_KADASTER_BONAIRE_PROD_URL' },
+  { label: 'DLV Aruba (PROD)', envVar: 'SYSTEM_DB_DLV_ARUBA_PROD_URL' },
 ];
 
 function testTcpReachable(host: string, port: number, timeoutMs: number): Promise<boolean> {

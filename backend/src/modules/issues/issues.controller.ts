@@ -1,5 +1,5 @@
 import type { Request, Response, NextFunction } from 'express';
-import { UnauthorizedError } from '../../utils/AppError';
+import { UnauthorizedError, ValidationError } from '../../utils/AppError';
 import { successResponse } from '../../types/api.types';
 import * as issuesService from './issues.service';
 import type {
@@ -8,6 +8,7 @@ import type {
   IssueResolveInput,
   IssueUpdateInput,
 } from './issues.types';
+import * as mondayService from '../monday/monday.service';
 
 function actorId(req: Request): number {
   if (!req.user) throw new UnauthorizedError();
@@ -62,6 +63,45 @@ export async function resolve(req: Request, res: Response, next: NextFunction): 
       actorId(req),
     );
     res.json(successResponse(issue, 'Issue resolved'));
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function listMondayItems(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    const query = req.query as { boardKey?: string; includeDone?: boolean };
+    const result = await mondayService.listMondayItems(query.boardKey, {
+      includeDone: query.includeDone ?? false,
+    });
+    res.json(successResponse(result));
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function importMondayItem(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    const boardKey = typeof req.query.boardKey === 'string' ? req.query.boardKey.trim() : '';
+    if (!boardKey) {
+      throw new ValidationError('boardKey query parameter is required');
+    }
+    const result = await mondayService.importMondayItem(
+      String(req.params.mondayItemId),
+      boardKey,
+      actorId(req),
+    );
+    res.status(result.created ? 201 : 200).json(
+      successResponse(result, result.created ? 'Issue created from Monday item' : 'Issue already linked'),
+    );
   } catch (error) {
     next(error);
   }

@@ -1,5 +1,6 @@
 import type { LucideIcon } from 'lucide-react';
 import {
+  Activity,
   AlertTriangle,
   Database,
   LayoutDashboard,
@@ -28,6 +29,13 @@ export type NavItem =
   | ({ kind: 'group' } & NavGroup);
 
 export const navigation: NavItem[] = [
+  {
+    kind: 'link',
+    labelKey: 'nav.statusWall',
+    to: '/status-wall',
+    icon: Activity,
+    permission: 'dashboard.view',
+  },
   {
     kind: 'link',
     labelKey: 'nav.support',

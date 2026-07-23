@@ -20,6 +20,15 @@ router.get('/', requirePermission('systems.view'), async (_req, res, next) => {
   }
 });
 
+router.get('/health', requirePermission('systems.view'), async (_req, res, next) => {
+  try {
+    const systems = await systemsService.checkAllSystemsHealth();
+    res.json(successResponse(systems));
+  } catch (error) {
+    next(error);
+  }
+});
+
 router.get('/:id', requirePermission('systems.view'), validate(idParamsSchema, 'params'), async (req, res, next) => {
   try {
     const system = await systemsService.getSystemById(Number(req.params.id));

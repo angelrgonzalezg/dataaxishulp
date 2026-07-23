@@ -60,29 +60,42 @@ export function buildMssqlConfig(url: string): {
 } {
   const parsed = parseSqlServerUrl(url);
   const summary = `${parsed.server}:${parsed.port}/${parsed.database ?? '?'}${parsed.integrated ? ' (Windows auth)' : ` (user=${parsed.user ?? '?'})`}`;
+  const server = parsed.port ? `${parsed.server},${parsed.port}` : parsed.server;
+  const trust = parsed.trustServerCertificate ? 'yes' : 'no';
+  const encrypt = parsed.encrypt ? 'yes' : 'no';
 
-  if (parsed.integrated) {
-    const server = parsed.port ? `${parsed.server},${parsed.port}` : parsed.server;
-    const trust = parsed.trustServerCertificate ? 'yes' : 'no';
-    const encrypt = parsed.encrypt ? 'yes' : 'no';
-    const connectionString = [
-      'Driver={ODBC Driver 18 for SQL Server}',
-      `Server=${server}`,
-      `Database=${parsed.database ?? ''}`,
-      'Trusted_Connection=yes',
-      `TrustServerCertificate=${trust}`,
-      `Encrypt=${encrypt}`,
-      `Connection Timeout=${Math.ceil(DEFAULT_CONNECTION_TIMEOUT_MS / 1000)}`,
-    ].join(';');
+  if (parsed.integrated || (process.platform === 'win32' && parsed.user && parsed.password)) {
+    const connectionString = parsed.integrated
+      ? [
+          'Driver={ODBC Driver 18 for SQL Server}',
+          `Server=${server}`,
+          `Database=${parsed.database ?? ''}`,
+          'Trusted_Connection=yes',
+          `TrustServerCertificate=${trust}`,
+          `Encrypt=${encrypt}`,
+          `Connection Timeout=${Math.ceil(DEFAULT_CONNECTION_TIMEOUT_MS / 1000)}`,
+        ].join(';')
+      : [
+          'Driver={ODBC Driver 18 for SQL Server}',
+          `Server=${server}`,
+          `Database=${parsed.database ?? ''}`,
+          `UID=${parsed.user}`,
+          `PWD=${parsed.password}`,
+          `TrustServerCertificate=${trust}`,
+          `Encrypt=${encrypt}`,
+          `Connection Timeout=${Math.ceil(DEFAULT_CONNECTION_TIMEOUT_MS / 1000)}`,
+        ].join(';');
 
     return {
       driver: sqlNative,
       summary,
+      // msnodesqlv8 uses top-level connectionString (not modeled on sql.config).
       config: {
+        server: parsed.server,
         connectionString,
         connectionTimeout: DEFAULT_CONNECTION_TIMEOUT_MS,
         requestTimeout: DEFAULT_REQUEST_TIMEOUT_MS,
-      } as sql.config,
+      } as unknown as sql.config,
     };
   }
 

@@ -30,6 +30,18 @@ Dataaxishulp/
 
 ## Quick start
 
+> **Note:** there is no code in the repo root — the app is split into `backend/` and `frontend/`.
+> Run `npm` inside each folder, **or** use the root launcher below to start both at once.
+
+### One-command launcher (root)
+
+From the repo root (`Dataaxishulp/`):
+
+```bash
+npm run install:all   # first time only: installs root + backend + frontend deps
+npm run dev           # starts backend (3021) and frontend (3020) together
+```
+
 ### 1. Application database
 
 Create the `DataAxisHulp` database on local SQL Server (SSMS or `sqlcmd`):
@@ -87,6 +99,10 @@ Currently registered:
 | System | Variable | Database |
 |--------|----------|----------|
 | Kadaster Statia | `SYSTEM_DB_KADASTER_STATIA_URL` | `KadasterStatia-BDMigration` |
+| Kadaster Saba | `SYSTEM_DB_KADASTER_SABA_URL` | `KadasterSabaBDMigration` |
+| Kadaster Bonaire | `SYSTEM_DB_KADASTER_BONAIRE_URL` | `Kadaster-BDMigration` |
+| DLV Aruba (Local) | `SYSTEM_DB_DLV_ARUBA_URL` | `tereno_dev_AG_local` |
+| DLV Aruba (PROD) | `SYSTEM_DB_DLV_ARUBA_PROD_URL` | `sqldb-tereno-dev` (Azure; VPN) |
 
 Example in `backend/.env`:
 

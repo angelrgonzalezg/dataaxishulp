@@ -41,3 +41,19 @@ export const issueResolveSchema = z.object({
 export const issueIdParamsSchema = z.object({
   id: z.coerce.number().int().positive(),
 });
+
+export const mondayItemIdParamsSchema = z.object({
+  mondayItemId: z.string().min(1).max(40),
+});
+
+export const mondayBoardQuerySchema = z.object({
+  boardKey: z.string().min(1).max(40).optional(),
+  includeDone: z
+    .enum(['true', 'false'])
+    .optional()
+    .transform((value) => value === 'true'),
+});
+
+export const mondayImportQuerySchema = z.object({
+  boardKey: z.string().min(1).max(40),
+});

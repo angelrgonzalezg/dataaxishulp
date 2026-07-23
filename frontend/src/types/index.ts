@@ -56,6 +56,10 @@ export interface SystemConnection {
   last_error: string | null;
 }
 
+export interface SystemHealth extends SystemConnection {
+  response_ms: number | null;
+}
+
 export interface IssueUserSummary {
   user_id: number;
   username: string;
@@ -96,6 +100,79 @@ export interface IssueHistoryEntry {
 
 export interface IssueDetail extends Issue {
   history: IssueHistoryEntry[];
+}
+
+export interface MondayColumnValue {
+  column_id: string;
+  column_title: string;
+  text: string | null;
+  value: string | null;
+}
+
+export interface MondayItem {
+  monday_item_id: string;
+  name: string;
+  status: string | null;
+  priority: string | null;
+  assignee: string | null;
+  group: string;
+  board: string;
+  updated_at: string | null;
+  monday_url: string | null;
+  columns: MondayColumnValue[];
+}
+
+export interface MondayBoardItemsResult {
+  board_key: string;
+  label: string;
+  workspace: string;
+  board: string;
+  group: string;
+  open_items: MondayItem[];
+  done_items: MondayItem[];
+  /** @deprecated Use open_items */
+  items: MondayItem[];
+  counts: {
+    open: number;
+    done: number;
+    total: number;
+  };
+  local_issue_by_monday_id: Record<string, number>;
+}
+
+export interface MondayDashboardSummary {
+  configured: boolean;
+  workspace: string | null;
+  last_synced_at: string | null;
+  totals: {
+    open: number;
+    done: number;
+    total: number;
+    imported_local: number;
+  };
+  by_board: Array<{
+    board_key: string;
+    label: string;
+    open: number;
+    done: number;
+    total: number;
+  }>;
+}
+
+export interface MondayAllItemsResult {
+  workspace: string;
+  synced_at: string;
+  boards: MondayBoardItemsResult[];
+}
+
+/** @deprecated Use MondayBoardItemsResult */
+export type MondayItemsResult = MondayBoardItemsResult;
+
+export interface MondayImportResult {
+  issue_id: number;
+  created: boolean;
+  board_key: string;
+  monday_item: MondayItem;
 }
 
 export interface TableColumnMeta {
@@ -203,6 +280,111 @@ export interface DeedHistorySupportLookup {
 
 export type SupportLookup = OrderSupportLookup | ParcelSupportLookup | DeedHistorySupportLookup;
 
+export type InzageObjectVariant = 'object' | 'object_beperkt' | 'her' | 'na';
+export type InzageSubjectVariant = 'subject' | 'negatief';
+
+export interface InzageDeedRef {
+  register: string | null;
+  segment: number | null;
+  number: number | null;
+}
+
+export interface InzageParty {
+  name: string;
+  share: string | null;
+  role: string | null;
+}
+
+export interface InzageEntry {
+  parties: InzageParty[];
+  legalFact: string | null;
+  obtainedLabel: string | null;
+  typeDescription: string | null;
+  deedDate: string | null;
+  submissionDate: string | null;
+  notary: string | null;
+  note: string | null;
+  amount: string | null;
+  deed: InzageDeedRef;
+  extraLines: string[];
+  sourceDeeds: InzageDeedRef[];
+}
+
+export interface InzageSection {
+  key: string;
+  heading: string;
+  emptyText: string | null;
+  entries: InzageEntry[];
+}
+
+export interface InzageObjectReport {
+  kind: 'object';
+  variant: InzageObjectVariant;
+  system_key: string;
+  system_name: string;
+  is_production: boolean;
+  title: string;
+  generated_at: string;
+  header: {
+    parcel_id: number;
+    esri: string | null;
+    description: string | null;
+    size: string | null;
+    sheet: string | null;
+    diamond_letter: string | null;
+    location: string | null;
+    status: string | null;
+    particulars: string | null;
+    split_flag: boolean;
+    is_reviewed: boolean;
+  };
+  sections: InzageSection[];
+  linked_subjects: Array<{ subject_id: number; name: string }>;
+}
+
+export interface InzageSubjectRight {
+  index: number;
+  parcel_id: number | null;
+  esri: string | null;
+  size: string | null;
+  description: string | null;
+  location: string | null;
+  sheet: string | null;
+  diamond_letter: string | null;
+  share: string | null;
+  legal_fact_type: string | null;
+  obtained_at: string | null;
+  akte: string | null;
+  price: string | null;
+  submission_date: string | null;
+  deed_date: string | null;
+  notary: string | null;
+}
+
+export interface InzageSubjectReport {
+  kind: 'subject';
+  variant: InzageSubjectVariant;
+  system_key: string;
+  system_name: string;
+  is_production: boolean;
+  title: string;
+  generated_at: string;
+  person: {
+    subject_id: number;
+    is_natural_person: boolean;
+    name: string;
+    gender: string | null;
+    occupation: string | null;
+    date_of_birth: string | null;
+    place_of_birth: string | null;
+    country: string | null;
+    organizational_structure: string | null;
+    address: string | null;
+  };
+  rights: InzageSubjectRight[];
+  declaration: string | null;
+}
+
 export interface DashboardOverview {
   generated_at: string;
   totals: {
@@ -214,6 +396,7 @@ export interface DashboardOverview {
     critical_open: number;
     systems: number;
   };
+  monday: MondayDashboardSummary | null;
   by_system: Array<{ system_id: number; name: string; count: number }>;
   recent_issues: Array<{
     issue_id: number;
@@ -223,5 +406,6 @@ export interface DashboardOverview {
     system_name: string;
     assigned_to: string | null;
     updated_at: string;
+    source?: 'monday' | 'local';
   }>;
 }

@@ -36,3 +36,21 @@
     @apply bg-ink-300 rounded-full;
   }
 }
+
+@media print {
+  body * {
+    visibility: hidden;
+  }
+
+  .inzage-print-root,
+  .inzage-print-root * {
+    visibility: visible;
+  }
+
+  .inzage-print-root {
+    position: absolute;
+    inset: 0;
+    margin: 0;
+    padding: 0;
+  }
+}

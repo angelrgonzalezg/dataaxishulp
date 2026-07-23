@@ -12,8 +12,18 @@ import {
 } from './support.service';
 import { lookupParcel } from './support.parcel.service';
 import { lookupDeedHistoryByTitle } from './support.deed.service';
+import { buildObjectInzage } from './inzage.service';
+import { buildSubjectInzage } from './inzage.subject.service';
+import type { InzageObjectVariant, InzageSubjectVariant } from './inzage.types';
 
 const router = Router();
+
+const objectVariants: InzageObjectVariant[] = ['object', 'object_beperkt', 'her', 'na'];
+const subjectVariants: InzageSubjectVariant[] = ['subject', 'negatief'];
+
+const subjectParamsSchema = z.object({
+  subjectId: z.coerce.number().int().positive(),
+});
 
 const systemKeySchema = z.object({
   systemKey: z.string().min(1).optional(),
@@ -114,6 +124,60 @@ router.get(
         parcelId: query.parcelId,
         meetBrief: query.meetBrief,
         systemKey: query.systemKey,
+      });
+      res.json(successResponse(data));
+    } catch (error) {
+      next(error);
+    }
+  },
+);
+
+router.get(
+  '/inzage/parcel/:parcelId',
+  requirePermission('support.view'),
+  validate(parcelParamsSchema, 'params'),
+  validate(systemKeySchema, 'query'),
+  async (req, res, next) => {
+    try {
+      const systemKey =
+        (req.query.systemKey as string | undefined)?.trim() || DEFAULT_SYSTEM_KEY;
+      const requested = (req.query.variant as string | undefined)?.trim() as
+        | InzageObjectVariant
+        | undefined;
+      const variant = objectVariants.includes(requested as InzageObjectVariant)
+        ? (requested as InzageObjectVariant)
+        : 'object';
+      const data = await buildObjectInzage({
+        parcelId: Number(req.params.parcelId),
+        systemKey,
+        variant,
+      });
+      res.json(successResponse(data));
+    } catch (error) {
+      next(error);
+    }
+  },
+);
+
+router.get(
+  '/inzage/subject/:subjectId',
+  requirePermission('support.view'),
+  validate(subjectParamsSchema, 'params'),
+  validate(systemKeySchema, 'query'),
+  async (req, res, next) => {
+    try {
+      const systemKey =
+        (req.query.systemKey as string | undefined)?.trim() || DEFAULT_SYSTEM_KEY;
+      const requested = (req.query.variant as string | undefined)?.trim() as
+        | InzageSubjectVariant
+        | undefined;
+      const variant = subjectVariants.includes(requested as InzageSubjectVariant)
+        ? (requested as InzageSubjectVariant)
+        : 'subject';
+      const data = await buildSubjectInzage({
+        subjectId: Number(req.params.subjectId),
+        systemKey,
+        variant,
       });
       res.json(successResponse(data));
     } catch (error) {

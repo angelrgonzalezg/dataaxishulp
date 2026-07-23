@@ -5,5 +5,6 @@ export function useDashboardOverview() {
   return useQuery({
     queryKey: ['dashboard', 'overview'],
     queryFn: fetchDashboardOverview,
+    refetchInterval: 5 * 60 * 1000,
   });
 }
