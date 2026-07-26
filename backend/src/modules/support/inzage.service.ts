@@ -4,9 +4,10 @@ import {
   getField,
   getFieldNumber,
   getFieldString,
-  isTerenoSupportSystem,
+  isTerenoDialect,
   querySafe,
   resolveSupportSystem,
+  resolveSystemDialect,
 } from './support.frames';
 import { resolveParcelSplitInfo } from './support.parcel.split';
 import {
@@ -136,7 +137,8 @@ async function fetchDeedDetails(
   parcelId: number,
   typeIds: number[],
 ): Promise<Record<string, unknown>[]> {
-  const { sql, typeParams } = isTerenoSupportSystem(systemKey)
+  const dialect = await resolveSystemDialect(systemKey);
+  const { sql, typeParams } = isTerenoDialect(dialect)
     ? deedDetailQueryTereno(typeIds)
     : deedDetailQuery(typeIds);
   return querySafe(systemKey, sql, { parcelId, approved: APPROVED, ...typeParams });
@@ -241,7 +243,7 @@ async function fetchMandeligDeeds(
   parcelId: number,
   role: 'main' | 'share',
 ): Promise<Record<string, unknown>[]> {
-  if (isTerenoSupportSystem(systemKey)) {
+  if (isTerenoDialect(await resolveSystemDialect(systemKey))) {
     const column = role === 'main' ? 'mainParcelId' : 'shareParcelId';
     return querySafe(
       systemKey,
@@ -283,7 +285,7 @@ async function fetchMandeligMembers(
   parcelId: number,
   role: 'main' | 'share',
 ): Promise<string[]> {
-  if (isTerenoSupportSystem(systemKey)) {
+  if (isTerenoDialect(await resolveSystemDialect(systemKey))) {
     const filterColumn = role === 'main' ? 'mainParcelId' : 'shareParcelId';
     const joinColumn = role === 'main' ? 'shareParcelId' : 'mainParcelId';
     const rows = await querySafe(
@@ -451,7 +453,7 @@ async function fetchOwnershipShareMap(
   systemKey: string,
   parcelId: number,
 ): Promise<Map<number, string>> {
-  const rows = isTerenoSupportSystem(systemKey)
+  const rows = isTerenoDialect(await resolveSystemDialect(systemKey))
     ? await querySafe(
         systemKey,
         `SELECT dd.legalFactTypeId AS legalFactTypeId, dd.subjectId AS SubjectId,
@@ -558,7 +560,7 @@ export async function buildObjectInzage(input: {
   const systemKey = input.systemKey?.trim() || DEFAULT_SYSTEM_KEY;
   const variant = input.variant ?? 'object';
   const system = await resolveSupportSystem(systemKey);
-  const tereno = isTerenoSupportSystem(systemKey);
+  const tereno = isTerenoDialect(system.dialect);
 
   const parcels = tereno
     ? await querySafe(systemKey, 'SELECT * FROM Parcel WHERE id = @parcelId', {
@@ -918,6 +920,7 @@ export async function buildObjectInzage(input: {
     variant,
     system_key: system.system_key,
     system_name: system.system_name,
+    dialect: system.dialect,
     is_production: system.is_production,
     title: TITLE_BY_VARIANT[variant],
     generated_at: formatDateTime(new Date()),

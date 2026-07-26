@@ -121,7 +121,12 @@ From the UI (**Systems / DB**) you can test the connection.
 To add another system later:
 
 1. Add the URL in `.env` (`SYSTEM_DB_OTHER_SYSTEM_URL=...`)
-2. Insert the row in `system_connections` (or extend `seedSystems.ts`)
+2. Insert the row in `system_connections` (or extend `seedSystems.ts`) with the correct **`dialect`**:
+   - `kadaster` — Statia / Saba
+   - `tereno` — DLV Aruba
+   - `bonaire` — Bonaire (currently kadaster-like until verified)
+
+After schema changes: `npx prisma db push` then `npm run seed:systems`.
 
 ## Roles
 

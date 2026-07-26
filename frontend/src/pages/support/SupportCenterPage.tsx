@@ -2,12 +2,12 @@ import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { FileText, LifeBuoy, Search } from 'lucide-react';
+import { ClipboardList, FileText, LifeBuoy, Search, ArrowLeft } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
-import { ChangeTypeAkteTool } from '@/components/support/ChangeTypeAkteTool';
+import { ResolutionToolsMenu } from '@/components/support/ResolutionToolsMenu';
 import { ProductionEnvironmentBanner } from '@/components/support/ProductionEnvironmentBanner';
 import { TableFrameCard } from '@/components/support/TableFrameCard';
 import { extractErrorMessage } from '@/api/client';
@@ -20,7 +20,7 @@ import {
   useParcelSupportByMeetBrief,
 } from '@/hooks/useSupport';
 import { useSystems } from '@/hooks/useSystems';
-import type { DeedTypeAkteOption, SupportLookup, TableFrame } from '@/types';
+import type { DeedTypeAkteOption, ParcelSupportLookup, SupportLookup, TableFrame } from '@/types';
 
 const SYSTEM_STORAGE_KEY = 'dataaxis-hulp-support-system';
 
@@ -32,9 +32,8 @@ type EntryMode =
   | 'parcel_number'
   | 'meet_brief';
 
-function isTerenoSupportSystem(systemKey: string): boolean {
-  const key = systemKey.toLowerCase();
-  return key.startsWith('dlv_') || key.includes('tereno') || key.includes('aruba');
+function isTerenoDialect(dialect: string | null | undefined): boolean {
+  return dialect === 'tereno';
 }
 
 function asNullableNumber(value: unknown): number | null {
@@ -91,6 +90,58 @@ function extractDeedTypeAkteOptions(frames: TableFrame[] | undefined): DeedTypeA
   return options;
 }
 
+type LinkedParcelOrder = NonNullable<
+  NonNullable<ParcelSupportLookup['summary']>['linked_orders']
+>[number];
+
+function getLinkedParcelOrders(data: SupportLookup | undefined): LinkedParcelOrder[] {
+  if (!data || (data.entry !== 'parcel_number' && data.entry !== 'meet_brief')) {
+    return [];
+  }
+
+  const fromSummary = data.summary?.linked_orders;
+  if (fromSummary && fromSummary.length > 0) {
+    return fromSummary;
+  }
+
+  const productsFrame = data.frames.find((frame) => frame.key === 'order_products');
+  const productCountByOrder = new Map<number, number>();
+  for (const row of productsFrame?.rows ?? []) {
+    const orderId = asNullableNumber(row.orderId);
+    if (orderId == null) continue;
+    productCountByOrder.set(orderId, (productCountByOrder.get(orderId) ?? 0) + 1);
+  }
+
+  const ordersFrame = data.frames.find((frame) => frame.key === 'orders');
+  if (ordersFrame?.rows.length) {
+    return ordersFrame.rows
+      .map((row) => {
+        const orderId = asNullableNumber(row.id) ?? asNullableNumber(row.Id) ?? 0;
+        return {
+          order_id: orderId,
+          transaction_id: asNullableString(row.transactionId),
+          notary_code: asNullableString(row.notaryCode),
+          requester: asNullableString(row.requester),
+          register_date: asNullableString(row.registerDate),
+          product_count: productCountByOrder.get(orderId) ?? 0,
+        };
+      })
+      .filter((item) => item.order_id > 0);
+  }
+
+  // Last resort: distinct orderId from OrderProduct rows.
+  return [...productCountByOrder.entries()]
+    .map(([orderId, productCount]) => ({
+      order_id: orderId,
+      transaction_id: null,
+      notary_code: null,
+      requester: null,
+      register_date: null,
+      product_count: productCount,
+    }))
+    .sort((a, b) => b.order_id - a.order_id);
+}
+
 function groupFrames(frames: TableFrame[]) {
   const groups: Array<{ key: string; label: string; frames: TableFrame[] }> = [];
   const indexByKey = new Map<string, number>();
@@ -136,6 +187,13 @@ export function SupportCenterPage() {
   const [activeDeedHistoryTitle, setActiveDeedHistoryTitle] = useState<string | null>(null);
   const [activeParcelId, setActiveParcelId] = useState<number | null>(null);
   const [activeMeetBrief, setActiveMeetBrief] = useState<string | null>(null);
+  const [parcelReturn, setParcelReturn] = useState<{
+    entry: 'parcel_number' | 'meet_brief';
+    parcelId: number;
+    meetBrief: string | null;
+    parcelInput: string;
+    meetBriefInput: string;
+  } | null>(null);
 
   const selectedSystem = activeSystems.find((system) => system.system_key === systemKey)
     ?? activeSystems[0]
@@ -219,12 +277,14 @@ export function SupportCenterPage() {
 
   function onSystemChange(nextKey: string) {
     setSystemKey(nextKey);
+    setParcelReturn(null);
     clearActiveLookups();
   }
 
   function onSearch(event: React.FormEvent) {
     event.preventDefault();
     if (!activeSystemKey) return;
+    setParcelReturn(null);
 
     if (entryMode === 'order') {
       const orderId = Number(orderInput.trim());
@@ -273,6 +333,7 @@ export function SupportCenterPage() {
   }
 
   function selectCandidateParcel(parcelId: number) {
+    setParcelReturn(null);
     setEntryMode('parcel_number');
     setParcelInput(String(parcelId));
     clearActiveLookups();
@@ -280,10 +341,38 @@ export function SupportCenterPage() {
   }
 
   function selectCandidateOrder(orderId: number) {
+    if (
+      (entryMode === 'parcel_number' || entryMode === 'meet_brief') &&
+      data &&
+      (data.entry === 'parcel_number' || data.entry === 'meet_brief')
+    ) {
+      setParcelReturn({
+        entry: data.entry,
+        parcelId: data.parcel_id,
+        meetBrief: data.meet_brief,
+        parcelInput,
+        meetBriefInput,
+      });
+    }
     setEntryMode('order');
     setOrderInput(String(orderId));
     clearActiveLookups();
     setActiveOrderId(orderId);
+  }
+
+  function backToParcelLookup() {
+    if (!parcelReturn) return;
+    const ctx = parcelReturn;
+    setParcelReturn(null);
+    setEntryMode(ctx.entry);
+    setParcelInput(ctx.parcelInput);
+    setMeetBriefInput(ctx.meetBriefInput);
+    clearActiveLookups();
+    if (ctx.entry === 'parcel_number') {
+      setActiveParcelId(ctx.parcelId);
+    } else if (ctx.meetBrief) {
+      setActiveMeetBrief(ctx.meetBrief);
+    }
   }
 
   const searchValue =
@@ -347,9 +436,20 @@ export function SupportCenterPage() {
   const showResolutionTools =
     Boolean(data?.found) &&
     Boolean(activeSystemKey) &&
-    isTerenoSupportSystem(activeSystemKey ?? '') &&
+    isTerenoDialect(selectedSystem?.dialect ?? data?.dialect) &&
     (isParcelLikeEntry || isDeedHistoryEntry) &&
     deedTypeAkteOptions.length > 0;
+
+  const linkedParcelOrders = useMemo(() => getLinkedParcelOrders(data), [data]);
+  const showParcelOrdersPanel =
+    Boolean(data?.found) &&
+    isParcelLikeEntry &&
+    isTerenoDialect(selectedSystem?.dialect ?? data?.dialect);
+  const [selectedLinkedOrderId, setSelectedLinkedOrderId] = useState<number | ''>('');
+
+  useEffect(() => {
+    setSelectedLinkedOrderId('');
+  }, [data]);
 
   return (
     <div className="-mx-8 -mt-8">
@@ -440,8 +540,26 @@ export function SupportCenterPage() {
         <Card className="p-8 text-center text-sm text-ink-500">{t('common.loading')}</Card>
       )}
 
+      {parcelReturn && isOrderLikeEntry && (
+        <Card className="flex flex-col gap-3 border-brand-200 bg-brand-50/40 p-4 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <p className="text-sm font-bold text-ink-900">{t('support.backToParcelTitle')}</p>
+            <p className="text-sm text-ink-600">
+              {t('support.backToParcelHint', {
+                parcel: parcelReturn.parcelId,
+                meetBrief: parcelReturn.meetBrief ?? '—',
+              })}
+            </p>
+          </div>
+          <Button type="button" variant="secondary" onClick={backToParcelLookup}>
+            <ArrowLeft style={{ width: 16, height: 16 }} />
+            {t('support.backToParcel')}
+          </Button>
+        </Card>
+      )}
+
       {showResolutionTools && selectedSystem && (
-        <ChangeTypeAkteTool
+        <ResolutionToolsMenu
           systemKey={selectedSystem.system_key}
           isProduction={isProduction}
           systemName={selectedSystem.name}
@@ -520,11 +638,19 @@ export function SupportCenterPage() {
       )}
 
       {isParcelLikeEntry && data && data.summary && (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
           <Card className="p-4">
             <p className="text-xs font-semibold uppercase text-ink-400">{t('support.parcelId')}</p>
             <p className="mt-1 text-xl font-extrabold text-ink-900">{data.parcel_id}</p>
             <p className="text-xs text-ink-500">{data.summary.meet_brief ?? '—'}</p>
+          </Card>
+          <Card className="p-4 sm:col-span-2 xl:col-span-1">
+            <p className="text-xs font-semibold uppercase text-ink-400">
+              {t('support.parcelDescription')}
+            </p>
+            <p className="mt-1 line-clamp-3 text-sm font-semibold text-ink-900" title={data.summary.description ?? undefined}>
+              {data.summary.description ?? '—'}
+            </p>
           </Card>
           <Card className="p-4">
             <p className="text-xs font-semibold uppercase text-ink-400">{t('support.location')}</p>
@@ -605,6 +731,68 @@ export function SupportCenterPage() {
             <FileText style={{ width: 18, height: 18 }} />
             {t('inzage.generate')}
           </Button>
+        </Card>
+      )}
+
+      {showParcelOrdersPanel && (
+        <Card className="border-brand-200 bg-brand-50/30 p-5">
+          <div className="flex items-start gap-3">
+            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-brand-100 text-brand-700">
+              <ClipboardList style={{ width: 20, height: 20 }} />
+            </span>
+            <div className="min-w-0 flex-1 space-y-3">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-wide text-brand-700">
+                  {t('support.linkedParcelOrders')}
+                </p>
+                <p className="mt-1 text-sm text-ink-600">{t('support.linkedParcelOrdersHint')}</p>
+              </div>
+
+              {linkedParcelOrders.length === 0 ? (
+                <p className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                  {t('support.linkedParcelOrdersEmpty')}
+                </p>
+              ) : (
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+                  <div className="min-w-0 flex-1">
+                    <label className="mb-1.5 block text-sm font-medium text-ink-700">
+                      {t('support.linkedParcelOrdersSelect')}
+                    </label>
+                    <Select
+                      value={selectedLinkedOrderId}
+                      onChange={(event) => {
+                        const value = Number(event.target.value);
+                        setSelectedLinkedOrderId(
+                          Number.isFinite(value) && value > 0 ? value : '',
+                        );
+                      }}
+                    >
+                      <option value="">{t('support.linkedParcelOrdersPlaceholder')}</option>
+                      {linkedParcelOrders.map((order) => (
+                        <option key={order.order_id} value={order.order_id}>
+                          #{order.order_id}
+                          {order.transaction_id ? ` · ${order.transaction_id}` : ''}
+                          {order.notary_code ? ` · ${order.notary_code}` : ''}
+                          {` · ${order.product_count} ${t('support.orderProducts')}`}
+                        </option>
+                      ))}
+                    </Select>
+                  </div>
+                  <Button
+                    type="button"
+                    disabled={!selectedLinkedOrderId}
+                    onClick={() => {
+                      if (typeof selectedLinkedOrderId === 'number') {
+                        selectCandidateOrder(selectedLinkedOrderId);
+                      }
+                    }}
+                  >
+                    {t('support.openLinkedOrder')}
+                  </Button>
+                </div>
+              )}
+            </div>
+          </div>
         </Card>
       )}
 

@@ -2,8 +2,17 @@ import { prisma } from '../../config/db';
 import { AppError, NotFoundError } from '../../utils/AppError';
 import { isConnectionError, querySystem, serializeRow } from '../../utils/externalDb';
 import type { TableFrame } from './support.types';
+import {
+  inferDialectFromSystemKey,
+  isTerenoDialect,
+  normalizeDialect,
+  type SystemDialect,
+} from './systemDialect';
 
 export const DEFAULT_SYSTEM_KEY = 'kadaster_statia';
+
+export type { SystemDialect };
+export { isTerenoDialect, isKadasterLikeDialect, getDialectProfile } from './systemDialect';
 
 export function isProductionSystem(systemKey: string, envVarName?: string | null): boolean {
   const key = systemKey.toLowerCase();
@@ -11,15 +20,29 @@ export function isProductionSystem(systemKey: string, envVarName?: string | null
   return key.includes('_prod') || env.includes('_PROD');
 }
 
-/** Tereno / DLV Aruba uses Parcel + DeedDetail.plotId (not Kadaster PerceelTb). */
-export function isTerenoSupportSystem(systemKey: string): boolean {
-  const key = systemKey.toLowerCase();
-  return key.startsWith('dlv_') || key.includes('tereno') || key.includes('aruba');
+/**
+ * Sync helper for Tereno branching. Prefers DB dialect when already resolved;
+ * otherwise infers from systemKey (same rules as seed).
+ */
+export function isTerenoSupportSystem(
+  systemKey: string,
+  dialect?: SystemDialect | null,
+): boolean {
+  return isTerenoDialect(dialect ?? inferDialectFromSystemKey(systemKey));
+}
+
+export async function resolveSystemDialect(systemKey: string): Promise<SystemDialect> {
+  const system = await prisma.systemConnection.findUnique({
+    where: { systemKey },
+    select: { dialect: true, systemKey: true },
+  });
+  return normalizeDialect(system?.dialect, system?.systemKey ?? systemKey);
 }
 
 export async function resolveSupportSystem(systemKey: string): Promise<{
   system_key: string;
   system_name: string;
+  dialect: SystemDialect;
   is_production: boolean;
   env_var_name: string;
 }> {
@@ -33,6 +56,7 @@ export async function resolveSupportSystem(systemKey: string): Promise<{
   return {
     system_key: system.systemKey,
     system_name: system.name,
+    dialect: normalizeDialect(system.dialect, system.systemKey),
     is_production: isProductionSystem(system.systemKey, system.envVarName),
     env_var_name: system.envVarName,
   };

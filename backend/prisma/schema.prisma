@@ -35,6 +35,8 @@ model SystemConnection {
   systemKey     String    @unique @map("system_key") @db.NVarChar(50)
   name          String    @db.NVarChar(120)
   description   String?   @db.NVarChar(500)
+  /// Schema profile: kadaster | tereno | bonaire (bonaire currently kadaster-like until verified).
+  dialect       String    @default("kadaster") @map("dialect") @db.NVarChar(30)
   /// Env var name that holds the connection URL (never store passwords in DB)
   envVarName    String    @map("env_var_name") @db.NVarChar(100)
   host          String?   @db.NVarChar(200)

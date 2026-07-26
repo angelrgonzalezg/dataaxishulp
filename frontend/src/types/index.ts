@@ -44,6 +44,8 @@ export interface SystemConnection {
   system_key: string;
   name: string;
   description: string | null;
+  /** Schema profile: kadaster | tereno | bonaire */
+  dialect: 'kadaster' | 'tereno' | 'bonaire';
   env_var_name: string;
   host: string | null;
   port: number | null;
@@ -206,6 +208,7 @@ export interface OrderCandidate {
 export interface OrderSupportLookup {
   system_key: string;
   system_name: string;
+  dialect: string;
   is_production: boolean;
   entry: 'order' | 'kenmerk' | 'register_deed';
   order_id: number;
@@ -230,6 +233,7 @@ export interface OrderSupportLookup {
 export interface ParcelSupportLookup {
   system_key: string;
   system_name: string;
+  dialect: string;
   is_production: boolean;
   entry: 'parcel_number' | 'meet_brief';
   parcel_id: number;
@@ -243,6 +247,7 @@ export interface ParcelSupportLookup {
   }>;
   summary: {
     meet_brief: string | null;
+    description: string | null;
     location: string | null;
     sheet: string | null;
     size: string | null;
@@ -254,6 +259,14 @@ export interface ParcelSupportLookup {
     limited_rights_details: number;
     share_details: number;
     order_links: number;
+    linked_orders?: Array<{
+      order_id: number;
+      transaction_id: string | null;
+      notary_code: string | null;
+      requester: string | null;
+      register_date: string | null;
+      product_count: number;
+    }>;
     split_role?: 'source' | 'result' | 'none';
     split_flag?: boolean;
     split_child_count?: number;
@@ -274,6 +287,7 @@ export interface LegalFactOption {
 export interface DeedLegalFactState {
   system_key: string;
   system_name: string;
+  dialect: string;
   is_production: boolean;
   deed_id: number;
   register: string | null;
@@ -289,6 +303,7 @@ export interface UpdateDeedLegalFactResult {
   deed_id: number;
   system_key: string;
   system_name: string;
+  dialect: string;
   is_production: boolean;
   previous: LegalFactOption | null;
   next: LegalFactOption;
@@ -305,6 +320,7 @@ export interface DeedTypeAkteOption {
 export interface DeedHistorySupportLookup {
   system_key: string;
   system_name: string;
+  dialect: string;
   is_production: boolean;
   entry: 'deed_history';
   register_title: string;
@@ -366,6 +382,7 @@ export interface InzageObjectReport {
   variant: InzageObjectVariant;
   system_key: string;
   system_name: string;
+  dialect: string;
   is_production: boolean;
   title: string;
   generated_at: string;
@@ -414,6 +431,7 @@ export interface InzageSubjectReport {
   variant: InzageSubjectVariant;
   system_key: string;
   system_name: string;
+  dialect: string;
   is_production: boolean;
   title: string;
   generated_at: string;

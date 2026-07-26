@@ -6,12 +6,13 @@ import {
   buildFrame,
   getFieldNumber,
   getFieldString,
-  isTerenoSupportSystem,
+  isTerenoDialect,
   queryByIds,
   querySafe,
   resolveSupportSystem,
 } from './support.frames';
 import type { OrderCandidate, OrderSupportLookup, TableFrame } from './support.types';
+import { lookupOrderByIdTereno } from './support.order.tereno.service';
 
 function asStringIds(rows: Record<string, unknown>[], column: string): string[] {
   return [
@@ -65,6 +66,10 @@ export async function lookupOrderById(
 ): Promise<OrderSupportLookup> {
   const systemKey = systemKeyInput?.trim() || DEFAULT_SYSTEM_KEY;
   const system = await resolveSupportSystem(systemKey);
+
+  if (isTerenoDialect(system.dialect)) {
+    return lookupOrderByIdTereno(orderId, systemKey, options);
+  }
 
   const orders = await querySafe(
     systemKey,
@@ -235,6 +240,7 @@ export async function lookupOrderById(
   return {
     system_key: system.system_key,
     system_name: system.system_name,
+    dialect: system.dialect,
     is_production: system.is_production,
     entry: options?.entry ?? 'order',
     order_id: orderId,
@@ -297,6 +303,7 @@ export async function lookupOrderByKenmerk(
     return {
       system_key: system.system_key,
       system_name: system.system_name,
+      dialect: system.dialect,
       is_production: system.is_production,
       entry: 'kenmerk',
       order_id: 0,
@@ -339,7 +346,7 @@ export async function lookupOrderByRegisterTitle(
   const systemKey = systemKeyInput?.trim() || DEFAULT_SYSTEM_KEY;
   const system = await resolveSupportSystem(systemKey);
 
-  const registerFk = isTerenoSupportSystem(systemKey)
+  const registerFk = isTerenoDialect(system.dialect)
     ? 'legalFactRegisterId'
     : 'DeedTypeId';
 
@@ -372,7 +379,7 @@ export async function lookupOrderByRegisterTitle(
     const frames: TableFrame[] = [
       buildFrame('deeds', 'Deeds', 'Deed', 'id', deeds),
     ];
-    const registerIds = isTerenoSupportSystem(systemKey)
+    const registerIds = isTerenoDialect(system.dialect)
       ? asNumberIds(deeds, 'legalFactRegisterId')
       : asNumberIds(deeds, 'DeedTypeId');
     const registers = await queryByIds(systemKey, 'LegalFactRegister', 'id', registerIds);
@@ -383,6 +390,7 @@ export async function lookupOrderByRegisterTitle(
     return {
       system_key: system.system_key,
       system_name: system.system_name,
+      dialect: system.dialect,
       is_production: system.is_production,
       entry: 'register_deed',
       order_id: 0,
@@ -417,6 +425,7 @@ export async function lookupOrderByRegisterTitle(
     return {
       system_key: system.system_key,
       system_name: system.system_name,
+      dialect: system.dialect,
       is_production: system.is_production,
       entry: 'register_deed',
       order_id: 0,

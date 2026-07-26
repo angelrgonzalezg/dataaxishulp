@@ -6,12 +6,13 @@ import {
   filterByIds,
   getFieldNumber,
   getFieldString,
-  isTerenoSupportSystem,
   queryByIds,
   querySafe,
   resolveSupportSystem,
 } from './support.frames';
 import { lookupParcelTereno } from './support.parcel.tereno.service';
+import { isTerenoDialect } from './systemDialect';
+import { enrichDeedDetailRows } from './support.deeddetail.enrich';
 import type { ParcelSupportLookup, TableFrame } from './support.types';
 
 /** Same legalFactTypeId groups used by Kadaster parcels Andere details (Alles). */
@@ -85,8 +86,9 @@ export async function lookupParcel(input: {
   systemKey?: string;
 }): Promise<ParcelSupportLookup> {
   const systemKey = input.systemKey?.trim() || DEFAULT_SYSTEM_KEY;
+  const system = await resolveSupportSystem(systemKey);
 
-  if (isTerenoSupportSystem(systemKey)) {
+  if (isTerenoDialect(system.dialect)) {
     return lookupParcelTereno({
       parcelId: input.parcelId,
       meetBrief: input.meetBrief,
@@ -94,7 +96,6 @@ export async function lookupParcel(input: {
     });
   }
 
-  const system = await resolveSupportSystem(systemKey);
   const { parcels, entry } = await resolveParcelRows(systemKey, input);
 
   if (parcels.length === 0) {
@@ -116,6 +117,7 @@ export async function lookupParcel(input: {
     return {
       system_key: system.system_key,
       system_name: system.system_name,
+      dialect: system.dialect,
       is_production: system.is_production,
       entry,
       parcel_id: 0,
@@ -255,9 +257,10 @@ export async function lookupParcel(input: {
   );
 
   // --- Andere details: all DeedDetail for this parcel (source of Titels / Hypotheek / Beslag) ---
-  const allDeedDetails = await querySafe(systemKey, 'SELECT * FROM DeedDetail WHERE PlotId = @parcelId', {
+  const allDeedDetailsRaw = await querySafe(systemKey, 'SELECT * FROM DeedDetail WHERE PlotId = @parcelId', {
     parcelId,
   });
+  const allDeedDetails = await enrichDeedDetailRows(systemKey, allDeedDetailsRaw);
   pushFrame(
     frames,
     buildFrame(
@@ -571,6 +574,7 @@ export async function lookupParcel(input: {
   return {
     system_key: system.system_key,
     system_name: system.system_name,
+    dialect: system.dialect,
     is_production: system.is_production,
     entry,
     parcel_id: parcelId,
@@ -579,6 +583,7 @@ export async function lookupParcel(input: {
     candidates: candidates.length > 1 ? candidates : undefined,
     summary: {
       meet_brief: meetBrief,
+      description: getFieldString(parcel, 'PerceelOmschrijving', 'description'),
       location: getFieldString(parcel, 'PerceelPlaatselijke'),
       sheet: getFieldString(parcel, 'PerceelBlad'),
       size: getFieldString(parcel, 'PerceelOppervlakteHA'),

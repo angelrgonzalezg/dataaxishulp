@@ -4,9 +4,11 @@ import {
   DEFAULT_SYSTEM_KEY,
   getFieldNumber,
   getFieldString,
-  isTerenoSupportSystem,
+  isTerenoDialect,
   resolveSupportSystem,
+  resolveSystemDialect,
 } from './support.frames';
+import type { SystemDialect } from './systemDialect';
 
 export interface LegalFactOption {
   id: number;
@@ -18,6 +20,7 @@ export interface LegalFactOption {
 export interface DeedLegalFactState {
   system_key: string;
   system_name: string;
+  dialect: string;
   is_production: boolean;
   deed_id: number;
   register: string | null;
@@ -29,12 +32,14 @@ export interface DeedLegalFactState {
   legal_fact_name_en: string | null;
 }
 
-function requireTerenoSystem(systemKey: string): void {
-  if (!isTerenoSupportSystem(systemKey)) {
+async function requireTerenoSystem(systemKey: string): Promise<SystemDialect> {
+  const dialect = await resolveSystemDialect(systemKey);
+  if (!isTerenoDialect(dialect)) {
     throw new ValidationError(
       'Change Type akte is only available for DLV / Tereno system connections.',
     );
   }
+  return dialect;
 }
 
 function mapLegalFactRow(row: Record<string, unknown>): LegalFactOption {
@@ -52,7 +57,7 @@ function mapLegalFactRow(row: Record<string, unknown>): LegalFactOption {
 
 export async function listLegalFacts(systemKeyInput?: string): Promise<LegalFactOption[]> {
   const systemKey = systemKeyInput?.trim() || DEFAULT_SYSTEM_KEY;
-  requireTerenoSystem(systemKey);
+  await requireTerenoSystem(systemKey);
   await resolveSupportSystem(systemKey);
 
   const rows = await querySystem(
@@ -70,7 +75,7 @@ export async function getDeedLegalFact(
   systemKeyInput?: string,
 ): Promise<DeedLegalFactState> {
   const systemKey = systemKeyInput?.trim() || DEFAULT_SYSTEM_KEY;
-  requireTerenoSystem(systemKey);
+  await requireTerenoSystem(systemKey);
   const system = await resolveSupportSystem(systemKey);
 
   const rows = await querySystem(
@@ -98,6 +103,7 @@ export async function getDeedLegalFact(
   return {
     system_key: system.system_key,
     system_name: system.system_name,
+    dialect: system.dialect,
     is_production: system.is_production,
     deed_id: getFieldNumber(row, 'deedId') ?? deedId,
     register: getFieldString(row, 'register'),
@@ -120,12 +126,13 @@ export async function updateDeedLegalFact(input: {
   deed_id: number;
   system_key: string;
   system_name: string;
+  dialect: string;
   is_production: boolean;
   previous: LegalFactOption | null;
   next: LegalFactOption;
 }> {
   const systemKey = input.systemKey?.trim() || DEFAULT_SYSTEM_KEY;
-  requireTerenoSystem(systemKey);
+  await requireTerenoSystem(systemKey);
   const system = await resolveSupportSystem(systemKey);
 
   if (!input.confirm) {
@@ -191,6 +198,7 @@ export async function updateDeedLegalFact(input: {
     deed_id: input.deedId,
     system_key: system.system_key,
     system_name: system.system_name,
+    dialect: system.dialect,
     is_production: system.is_production,
     previous,
     next,

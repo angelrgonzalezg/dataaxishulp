@@ -6,12 +6,14 @@ import {
   buildFrame,
   getFieldNumber,
   getFieldString,
-  isTerenoSupportSystem,
+  isTerenoDialect,
   queryByIds,
   querySafe,
   resolveSupportSystem,
+  resolveSystemDialect,
 } from './support.frames';
 import { parseRegisterTitle } from './support.service';
+import { enrichDeedDetailRows } from './support.deeddetail.enrich';
 import type { DeedHistorySupportLookup, TableFrame } from './support.types';
 
 const MAX_HISTORY_DEPTH = 25;
@@ -52,7 +54,8 @@ async function resolveSeedDeeds(
 ): Promise<Record<string, unknown>[]> {
   // Tereno/DLV: Deed.legalFactRegisterId → LegalFactRegister.id
   // Kadaster:   Deed.DeedTypeId → LegalFactRegister.id
-  const tereno = isTerenoSupportSystem(systemKey);
+  const dialect = await resolveSystemDialect(systemKey);
+  const tereno = isTerenoDialect(dialect);
   const registerFk = tereno ? 'legalFactRegisterId' : 'DeedTypeId';
 
   // Use querySystem (not querySafe): a bad SQL used to return [] and look like "not found".
@@ -365,7 +368,8 @@ async function resolveHistoryDeedDetailIds(
   if (historyDeedIds.length === 0) return [];
 
   const { clause, params } = buildInClause(historyDeedIds, 'hid');
-  const tereno = isTerenoSupportSystem(systemKey);
+  const dialect = await resolveSystemDialect(systemKey);
+  const tereno = isTerenoDialect(dialect);
 
   // Tereno has no amendedDeedId; Kadaster may still use DeedID / amendedDeedId naming.
   const rows = tereno
@@ -438,7 +442,7 @@ export async function lookupDeedHistoryByTitle(
   const history = await traceDeedHistory(systemKey, seedDeedIds, hasRetiredByDeedDetailId);
   const historyDeedIds = history.map((node) => node.deedId);
 
-  const tereno = isTerenoSupportSystem(systemKey);
+  const tereno = isTerenoDialect(system.dialect);
   const deeds = await queryByIds(systemKey, 'Deed', 'id', historyDeedIds);
   const registerIds = tereno
     ? asNumberIds(deeds, 'legalFactRegisterId')
@@ -451,12 +455,13 @@ export async function lookupDeedHistoryByTitle(
     historyDeedIds,
     hasRetiredByDeedDetailId,
   );
-  const deedDetails = await queryByIds(
+  const deedDetailsRaw = await queryByIds(
     systemKey,
     'DeedDetail',
     tereno ? 'id' : 'Id',
     deedDetailIds,
   );
+  const deedDetails = await enrichDeedDetailRows(systemKey, deedDetailsRaw);
 
   const parcelIds = asNumberIds(deedDetails, tereno ? 'plotId' : 'PlotId');
   const subjectIds = asNumberIds(deedDetails, tereno ? 'subjectId' : 'SubjectId');
@@ -531,7 +536,7 @@ export async function lookupDeedHistoryByTitle(
     orderIds.length > 0
       ? await queryByIds(
           systemKey,
-          tereno ? 'Order' : 'Agenda',
+          tereno ? '[Order]' : 'Agenda',
           tereno ? 'id' : 'Agenda_ID',
           orderIds,
         )
@@ -657,7 +662,7 @@ export async function lookupDeedHistoryByTitle(
     buildFrame(
       'history_orders',
       tereno ? 'Orders for linked deeds' : 'Orders (Agenda) for linked deeds',
-      tereno ? 'Order' : 'Agenda',
+      tereno ? '[Order]' : 'Agenda',
       tereno ? 'id' : 'Agenda_ID',
       orders,
       { section: 'orders', sectionLabel: 'Linked orders' },
@@ -667,6 +672,7 @@ export async function lookupDeedHistoryByTitle(
   return {
     system_key: system.system_key,
     system_name: system.system_name,
+    dialect: system.dialect,
     is_production: system.is_production,
     entry: 'deed_history',
     register_title: registerTitle,

@@ -69,6 +69,7 @@ export interface InzageObjectReport {
   variant: InzageObjectVariant;
   system_key: string;
   system_name: string;
+  dialect: string;
   is_production: boolean;
   title: string;
   generated_at: string;
@@ -115,6 +116,7 @@ export interface InzageSubjectReport {
   variant: InzageSubjectVariant;
   system_key: string;
   system_name: string;
+  dialect: string;
   is_production: boolean;
   title: string;
   generated_at: string;

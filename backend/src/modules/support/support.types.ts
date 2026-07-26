@@ -22,6 +22,8 @@ export interface TableFrame {
 export interface SupportLookupBase {
   system_key: string;
   system_name: string;
+  /** Schema profile: kadaster | tereno | bonaire */
+  dialect: string;
   is_production: boolean;
   found: boolean;
   frames: TableFrame[];
@@ -82,6 +84,7 @@ export interface ParcelSupportLookup extends SupportLookupBase {
   }>;
   summary: {
     meet_brief: string | null;
+    description: string | null;
     location: string | null;
     sheet: string | null;
     size: string | null;
@@ -93,6 +96,15 @@ export interface ParcelSupportLookup extends SupportLookupBase {
     limited_rights_details: number;
     share_details: number;
     order_links: number;
+    /** Orders linked via OrderParcel → OrderProduct (Tereno). */
+    linked_orders?: Array<{
+      order_id: number;
+      transaction_id: string | null;
+      notary_code: string | null;
+      requester: string | null;
+      register_date: string | null;
+      product_count: number;
+    }>;
     /** Split detection (Tereno / usp_SplitParcel_CopyFromOldParcel). */
     split_role?: 'source' | 'result' | 'none';
     split_flag?: boolean;

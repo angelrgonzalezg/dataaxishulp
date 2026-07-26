@@ -5,12 +5,14 @@ import {
   testSqlServerConnection,
 } from '../../utils/systemConnection';
 import { isProductionSystem } from '../support/support.frames';
+import { normalizeDialect, type SystemDialect } from '../support/systemDialect';
 
 export interface SystemResponse {
   system_id: number;
   system_key: string;
   name: string;
   description: string | null;
+  dialect: SystemDialect;
   env_var_name: string;
   host: string | null;
   port: number | null;
@@ -35,6 +37,7 @@ function mapSystem(row: {
   systemKey: string;
   name: string;
   description: string | null;
+  dialect: string;
   envVarName: string;
   host: string | null;
   port: number | null;
@@ -51,6 +54,7 @@ function mapSystem(row: {
     system_key: row.systemKey,
     name: row.name,
     description: row.description,
+    dialect: normalizeDialect(row.dialect, row.systemKey),
     env_var_name: row.envVarName,
     host: row.host,
     port: row.port,

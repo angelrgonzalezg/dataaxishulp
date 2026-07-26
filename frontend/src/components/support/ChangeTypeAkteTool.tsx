@@ -134,11 +134,8 @@ export function ChangeTypeAkteTool({
         </span>
         <div className="min-w-0 flex-1 space-y-4">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-wide text-brand-700">
-              {t('support.tools.title')}
-            </p>
-            <h3 className="mt-1 text-lg font-extrabold text-ink-900">
-              1. {t('support.tools.changeTypeAkte.title')}
+            <h3 className="pr-24 text-lg font-extrabold text-ink-900">
+              {t('support.tools.changeTypeAkte.title')}
             </h3>
             <p className="mt-1 text-sm text-ink-600">
               {t('support.tools.changeTypeAkte.description')}

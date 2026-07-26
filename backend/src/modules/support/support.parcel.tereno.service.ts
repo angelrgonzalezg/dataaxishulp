@@ -11,6 +11,8 @@ import {
   resolveSupportSystem,
 } from './support.frames';
 import { resolveParcelSplitInfo } from './support.parcel.split';
+import { enrichDeedDetailRows } from './support.deeddetail.enrich';
+import { enrichOrderProductsWithCatalog } from './support.order.tereno.service';
 import type { ParcelSupportLookup, TableFrame } from './support.types';
 
 /** Best-effort grouping aligned with Tereno legal-fact usage (may evolve). */
@@ -103,6 +105,7 @@ export async function lookupParcelTereno(input: {
     return {
       system_key: system.system_key,
       system_name: system.system_name,
+      dialect: system.dialect,
       is_production: system.is_production,
       entry,
       parcel_id: 0,
@@ -218,11 +221,12 @@ export async function lookupParcelTereno(input: {
     ),
   );
 
-  const allDeedDetails = await querySafe(
+  const allDeedDetailsRaw = await querySafe(
     systemKey,
     'SELECT * FROM DeedDetail WHERE plotId = @parcelId',
     { parcelId },
   );
+  const allDeedDetails = await enrichDeedDetailRows(systemKey, allDeedDetailsRaw);
   pushFrame(
     frames,
     buildFrame(
@@ -508,22 +512,78 @@ export async function lookupParcelTereno(input: {
   );
 
   const orderProductIds = asNumberIds(orderParcels, 'orderProductId');
-  const orderProducts = await queryByIds(systemKey, 'OrderProduct', 'id', orderProductIds);
+  const orderProductsRaw =
+    orderProductIds.length > 0
+      ? await (async () => {
+          const params: Record<string, unknown> = {};
+          const placeholders = orderProductIds.map((id, index) => {
+            const key = `opid${index}`;
+            params[key] = id;
+            return `@${key}`;
+          });
+          return querySafe(
+            systemKey,
+            `SELECT op.*,
+                    p.code AS code,
+                    p.nameNl AS nameNl,
+                    p.nameEn AS nameEn
+             FROM OrderProduct op
+             LEFT JOIN Product p ON p.id = op.productId
+             WHERE op.id IN (${placeholders.join(', ')})`,
+            params,
+          );
+        })()
+      : [];
+  const orderProducts = await enrichOrderProductsWithCatalog(systemKey, orderProductsRaw);
   pushFrame(
     frames,
     buildFrame('order_products', 'Order products', 'OrderProduct', 'id', orderProducts, SECTIONS.orders),
   );
 
   const orderIds = asNumberIds(orderProducts, 'orderId');
-  const orders = await queryByIds(systemKey, 'Order', 'id', orderIds);
+  // SQL Server: Order is a reserved keyword — must quote as [Order].
+  const orders = await queryByIds(systemKey, '[Order]', 'id', orderIds);
   pushFrame(
     frames,
     buildFrame('orders', 'Orders', 'Order', 'id', orders, SECTIONS.orders),
   );
 
+  const productCountByOrder = new Map<number, number>();
+  for (const row of orderProducts) {
+    const oid = getFieldNumber(row, 'orderId');
+    if (oid == null) continue;
+    productCountByOrder.set(oid, (productCountByOrder.get(oid) ?? 0) + 1);
+  }
+
+  const orderById = new Map<number, Record<string, unknown>>();
+  for (const order of orders) {
+    const id = getFieldNumber(order, 'id');
+    if (id != null) orderById.set(id, order);
+  }
+
+  const linkedOrders = orderIds
+    .map((orderId) => {
+      const order = orderById.get(orderId);
+      return {
+        order_id: orderId,
+        transaction_id: order ? getFieldString(order, 'transactionId') : null,
+        notary_code: order ? getFieldString(order, 'notaryCode') : null,
+        requester: order ? getFieldString(order, 'requester') : null,
+        register_date: order
+          ? order.registerDate instanceof Date
+            ? order.registerDate.toISOString()
+            : getFieldString(order, 'registerDate')
+          : null,
+        product_count: productCountByOrder.get(orderId) ?? 0,
+      };
+    })
+    .filter((item) => item.order_id > 0)
+    .sort((a, b) => b.order_id - a.order_id);
+
   return {
     system_key: system.system_key,
     system_name: system.system_name,
+    dialect: system.dialect,
     is_production: system.is_production,
     entry,
     parcel_id: parcelId,
@@ -532,6 +592,7 @@ export async function lookupParcelTereno(input: {
     candidates: candidates.length > 1 ? candidates : undefined,
     summary: {
       meet_brief: esri,
+      description: getFieldString(parcel, 'description'),
       location: getFieldString(parcel, 'location'),
       sheet: getFieldString(parcel, 'sheet'),
       size: getFieldString(parcel, 'size'),
@@ -543,6 +604,7 @@ export async function lookupParcelTereno(input: {
       limited_rights_details: limitedDetails.length,
       share_details: shareDetails.length + shareGroups.length,
       order_links: orderParcels.length,
+      linked_orders: linkedOrders,
       split_role: splitInfo.role,
       split_flag: splitInfo.split_flag,
       split_child_count: splitInfo.child_esris.length,
