@@ -226,6 +226,13 @@ export interface OrderSupportLookup {
     parcel_count: number;
     kenmerk?: string | null;
     register_title?: string | null;
+    linked_parcels?: Array<{
+      parcel_id: number;
+      meet_brief: string | null;
+      description: string | null;
+      location: string | null;
+      status: string | null;
+    }>;
   } | null;
   frames: TableFrame[];
 }

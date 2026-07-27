@@ -20,7 +20,13 @@ import {
   useParcelSupportByMeetBrief,
 } from '@/hooks/useSupport';
 import { useSystems } from '@/hooks/useSystems';
-import type { DeedTypeAkteOption, ParcelSupportLookup, SupportLookup, TableFrame } from '@/types';
+import type {
+  DeedTypeAkteOption,
+  OrderSupportLookup,
+  ParcelSupportLookup,
+  SupportLookup,
+  TableFrame,
+} from '@/types';
 
 const SYSTEM_STORAGE_KEY = 'dataaxis-hulp-support-system';
 
@@ -94,6 +100,10 @@ type LinkedParcelOrder = NonNullable<
   NonNullable<ParcelSupportLookup['summary']>['linked_orders']
 >[number];
 
+type LinkedOrderParcel = NonNullable<
+  NonNullable<OrderSupportLookup['summary']>['linked_parcels']
+>[number];
+
 function getLinkedParcelOrders(data: SupportLookup | undefined): LinkedParcelOrder[] {
   if (!data || (data.entry !== 'parcel_number' && data.entry !== 'meet_brief')) {
     return [];
@@ -140,6 +150,43 @@ function getLinkedParcelOrders(data: SupportLookup | undefined): LinkedParcelOrd
       product_count: productCount,
     }))
     .sort((a, b) => b.order_id - a.order_id);
+}
+
+function getLinkedOrderParcels(data: SupportLookup | undefined): LinkedOrderParcel[] {
+  if (!data || (data.entry !== 'order' && data.entry !== 'kenmerk' && data.entry !== 'register_deed')) {
+    return [];
+  }
+
+  const fromSummary = data.summary?.linked_parcels;
+  if (fromSummary && fromSummary.length > 0) {
+    return fromSummary;
+  }
+
+  const parcelsFrame = data.frames.find((frame) => frame.key === 'parcels');
+  if (!parcelsFrame?.rows.length) return [];
+
+  return parcelsFrame.rows
+    .map((row) => {
+      const parcelId =
+        asNullableNumber(row.id) ??
+        asNullableNumber(row.Id) ??
+        asNullableNumber(row.PerceelNummer) ??
+        0;
+      return {
+        parcel_id: parcelId,
+        meet_brief:
+          asNullableString(row.esri) ??
+          asNullableString(row.MeetbriefInf) ??
+          asNullableString(row.Meetbriefinf),
+        description:
+          asNullableString(row.description) ?? asNullableString(row.PerceelOmschrijving),
+        location:
+          asNullableString(row.location) ?? asNullableString(row.PerceelPlaatselijke),
+        status: asNullableString(row.status) ?? asNullableString(row.PerceelStatus),
+      };
+    })
+    .filter((item) => item.parcel_id > 0)
+    .sort((a, b) => a.parcel_id - b.parcel_id);
 }
 
 function groupFrames(frames: TableFrame[]) {
@@ -193,6 +240,15 @@ export function SupportCenterPage() {
     meetBrief: string | null;
     parcelInput: string;
     meetBriefInput: string;
+  } | null>(null);
+  const [orderReturn, setOrderReturn] = useState<{
+    entry: 'order' | 'kenmerk' | 'register_deed';
+    orderId: number;
+    orderInput: string;
+    kenmerkInput: string;
+    registerInput: string;
+    kenmerk: string | null;
+    registerTitle: string | null;
   } | null>(null);
 
   const selectedSystem = activeSystems.find((system) => system.system_key === systemKey)
@@ -278,6 +334,7 @@ export function SupportCenterPage() {
   function onSystemChange(nextKey: string) {
     setSystemKey(nextKey);
     setParcelReturn(null);
+    setOrderReturn(null);
     clearActiveLookups();
   }
 
@@ -285,6 +342,7 @@ export function SupportCenterPage() {
     event.preventDefault();
     if (!activeSystemKey) return;
     setParcelReturn(null);
+    setOrderReturn(null);
 
     if (entryMode === 'order') {
       const orderId = Number(orderInput.trim());
@@ -333,6 +391,21 @@ export function SupportCenterPage() {
   }
 
   function selectCandidateParcel(parcelId: number) {
+    if (
+      (entryMode === 'order' || entryMode === 'kenmerk' || entryMode === 'register_deed') &&
+      data &&
+      (data.entry === 'order' || data.entry === 'kenmerk' || data.entry === 'register_deed')
+    ) {
+      setOrderReturn({
+        entry: data.entry,
+        orderId: data.order_id,
+        orderInput,
+        kenmerkInput,
+        registerInput,
+        kenmerk: data.kenmerk ?? data.summary?.kenmerk ?? null,
+        registerTitle: data.register_title ?? data.summary?.register_title ?? null,
+      });
+    }
     setParcelReturn(null);
     setEntryMode('parcel_number');
     setParcelInput(String(parcelId));
@@ -354,6 +427,7 @@ export function SupportCenterPage() {
         meetBriefInput,
       });
     }
+    setOrderReturn(null);
     setEntryMode('order');
     setOrderInput(String(orderId));
     clearActiveLookups();
@@ -364,6 +438,7 @@ export function SupportCenterPage() {
     if (!parcelReturn) return;
     const ctx = parcelReturn;
     setParcelReturn(null);
+    setOrderReturn(null);
     setEntryMode(ctx.entry);
     setParcelInput(ctx.parcelInput);
     setMeetBriefInput(ctx.meetBriefInput);
@@ -372,6 +447,28 @@ export function SupportCenterPage() {
       setActiveParcelId(ctx.parcelId);
     } else if (ctx.meetBrief) {
       setActiveMeetBrief(ctx.meetBrief);
+    }
+  }
+
+  function backToOrderLookup() {
+    if (!orderReturn) return;
+    const ctx = orderReturn;
+    setOrderReturn(null);
+    setParcelReturn(null);
+    setEntryMode(ctx.entry);
+    setOrderInput(ctx.orderInput);
+    setKenmerkInput(ctx.kenmerkInput);
+    setRegisterInput(ctx.registerInput);
+    clearActiveLookups();
+    if (ctx.entry === 'order') {
+      setActiveOrderId(ctx.orderId);
+    } else if (ctx.entry === 'kenmerk' && ctx.kenmerk) {
+      setActiveKenmerk(ctx.kenmerk);
+    } else if (ctx.entry === 'register_deed' && ctx.registerTitle) {
+      setActiveRegisterTitle(ctx.registerTitle);
+    } else if (ctx.orderId > 0) {
+      setEntryMode('order');
+      setActiveOrderId(ctx.orderId);
     }
   }
 
@@ -441,14 +538,18 @@ export function SupportCenterPage() {
     deedTypeAkteOptions.length > 0;
 
   const linkedParcelOrders = useMemo(() => getLinkedParcelOrders(data), [data]);
+  const linkedOrderParcels = useMemo(() => getLinkedOrderParcels(data), [data]);
   const showParcelOrdersPanel =
     Boolean(data?.found) &&
     isParcelLikeEntry &&
     isTerenoDialect(selectedSystem?.dialect ?? data?.dialect);
+  const showOrderParcelsPanel = Boolean(data?.found) && isOrderLikeEntry;
   const [selectedLinkedOrderId, setSelectedLinkedOrderId] = useState<number | ''>('');
+  const [selectedLinkedParcelId, setSelectedLinkedParcelId] = useState<number | ''>('');
 
   useEffect(() => {
     setSelectedLinkedOrderId('');
+    setSelectedLinkedParcelId('');
   }, [data]);
 
   return (
@@ -554,6 +655,24 @@ export function SupportCenterPage() {
           <Button type="button" variant="secondary" onClick={backToParcelLookup}>
             <ArrowLeft style={{ width: 16, height: 16 }} />
             {t('support.backToParcel')}
+          </Button>
+        </Card>
+      )}
+
+      {orderReturn && isParcelLikeEntry && (
+        <Card className="flex flex-col gap-3 border-brand-200 bg-brand-50/40 p-4 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <p className="text-sm font-bold text-ink-900">{t('support.backToOrderTitle')}</p>
+            <p className="text-sm text-ink-600">
+              {t('support.backToOrderHint', {
+                order: orderReturn.orderId,
+                kenmerk: orderReturn.kenmerk ?? '—',
+              })}
+            </p>
+          </div>
+          <Button type="button" variant="secondary" onClick={backToOrderLookup}>
+            <ArrowLeft style={{ width: 16, height: 16 }} />
+            {t('support.backToOrder')}
           </Button>
         </Card>
       )}
@@ -788,6 +907,68 @@ export function SupportCenterPage() {
                     }}
                   >
                     {t('support.openLinkedOrder')}
+                  </Button>
+                </div>
+              )}
+            </div>
+          </div>
+        </Card>
+      )}
+
+      {showOrderParcelsPanel && (
+        <Card className="border-brand-200 bg-brand-50/30 p-5">
+          <div className="flex items-start gap-3">
+            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-brand-100 text-brand-700">
+              <ClipboardList style={{ width: 20, height: 20 }} />
+            </span>
+            <div className="min-w-0 flex-1 space-y-3">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-wide text-brand-700">
+                  {t('support.linkedOrderParcels')}
+                </p>
+                <p className="mt-1 text-sm text-ink-600">{t('support.linkedOrderParcelsHint')}</p>
+              </div>
+
+              {linkedOrderParcels.length === 0 ? (
+                <p className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                  {t('support.linkedOrderParcelsEmpty')}
+                </p>
+              ) : (
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+                  <div className="min-w-0 flex-1">
+                    <label className="mb-1.5 block text-sm font-medium text-ink-700">
+                      {t('support.linkedOrderParcelsSelect')}
+                    </label>
+                    <Select
+                      value={selectedLinkedParcelId}
+                      onChange={(event) => {
+                        const value = Number(event.target.value);
+                        setSelectedLinkedParcelId(
+                          Number.isFinite(value) && value > 0 ? value : '',
+                        );
+                      }}
+                    >
+                      <option value="">{t('support.linkedOrderParcelsPlaceholder')}</option>
+                      {linkedOrderParcels.map((parcel) => (
+                        <option key={parcel.parcel_id} value={parcel.parcel_id}>
+                          #{parcel.parcel_id}
+                          {parcel.meet_brief ? ` · ${parcel.meet_brief}` : ''}
+                          {parcel.location ? ` · ${parcel.location}` : ''}
+                          {parcel.description ? ` · ${parcel.description}` : ''}
+                        </option>
+                      ))}
+                    </Select>
+                  </div>
+                  <Button
+                    type="button"
+                    disabled={!selectedLinkedParcelId}
+                    onClick={() => {
+                      if (typeof selectedLinkedParcelId === 'number') {
+                        selectCandidateParcel(selectedLinkedParcelId);
+                      }
+                    }}
+                  >
+                    {t('support.openLinkedParcel')}
                   </Button>
                 </div>
               )}

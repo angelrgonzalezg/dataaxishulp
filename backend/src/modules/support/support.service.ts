@@ -159,9 +159,20 @@ export async function lookupOrderById(
   );
 
   const parcelIds = asNumberIds(orderParcels, 'Parcel');
+  let linkedParcels: NonNullable<OrderSupportLookup['summary']>['linked_parcels'] = [];
   if (parcelIds.length > 0) {
     const parcels = await queryByIds(systemKey, 'PerceelTb', 'PerceelNummer', parcelIds);
     frames.push(buildFrame('parcels', 'Parcels (PerceelTb)', 'PerceelTb', 'PerceelNummer', parcels));
+    linkedParcels = parcels
+      .map((parcel) => ({
+        parcel_id: getFieldNumber(parcel, 'PerceelNummer') ?? 0,
+        meet_brief: getFieldString(parcel, 'MeetbriefInf', 'Meetbriefinf'),
+        description: getFieldString(parcel, 'PerceelOmschrijving', 'description'),
+        location: getFieldString(parcel, 'PerceelPlaatselijke'),
+        status: getFieldString(parcel, 'PerceelStatus'),
+      }))
+      .filter((item) => item.parcel_id > 0)
+      .sort((a, b) => a.parcel_id - b.parcel_id);
   }
 
   const orderSubjects = await queryByIds(systemKey, 'OrderSubject', 'orderProductId', orderProductIds);
@@ -259,9 +270,10 @@ export async function lookupOrderById(
             : null,
       status: statusName != null ? String(statusName) : null,
       product_count: orderProducts.length,
-      parcel_count: parcelIds.length,
+      parcel_count: linkedParcels.length,
       kenmerk,
       register_title: options?.register_title ?? null,
+      linked_parcels: linkedParcels,
     },
     frames: frames.filter((frame) => frame.rowCount > 0 || frame.key === 'order'),
   };
