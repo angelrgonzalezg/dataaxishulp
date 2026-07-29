@@ -5,16 +5,23 @@ import {
   AlertTriangle,
   CheckCircle2,
   Clock,
+  Cpu,
   Database,
+  HardDrive,
   Maximize2,
+  MemoryStick,
   Minimize2,
   RefreshCw,
+  Server,
   Users,
+  Wifi,
+  WifiOff,
   XCircle,
 } from 'lucide-react';
-import { useSystemsHealth, useMondayWall } from '@/hooks/useStatusWall';
+import { extractErrorMessage } from '@/api/client';
+import { useLocalHostHealth, useSystemsHealth, useMondayWall } from '@/hooks/useStatusWall';
 import { REFRESH_INTERVAL_OPTIONS, useStatusWallStore } from '@/store/statusWallStore';
-import type { MondayItem, SystemHealth } from '@/types';
+import type { LocalHostHealth, MondayItem, SystemHealth } from '@/types';
 
 const BOARD_HEX: Record<string, string> = {
   statia: '#22c55e',
@@ -58,61 +65,238 @@ function formatInterval(ms: number): string {
   return ms >= 60000 ? `${ms / 60000} min` : `${ms / 1000} s`;
 }
 
-function SystemTile({ system }: { system: SystemHealth }) {
-  const state = statusColor(system);
-  const styles = {
-    online: 'border-emerald-500/40 bg-emerald-500/10',
-    offline: 'border-red-500/60 bg-red-500/15 animate-pulse',
-    unknown: 'border-slate-600/50 bg-slate-700/20',
-  }[state];
+function formatBytes(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes <= 0) return '0 GB';
+  return `${(bytes / 1024 ** 3).toFixed(1)} GB`;
+}
+
+function formatUptime(seconds: number): string {
+  const days = Math.floor(seconds / 86400);
+  const hours = Math.floor((seconds % 86400) / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  return days > 0 ? `${days}d ${hours}h` : `${hours}h ${minutes}m`;
+}
+
+function usageColor(percent: number): string {
+  if (percent >= 90) return 'bg-red-500';
+  if (percent >= 75) return 'bg-amber-400';
+  return 'bg-emerald-400';
+}
+
+function ResourceMetric({
+  icon,
+  label,
+  percent,
+  detail,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  percent: number | null;
+  detail?: string;
+}) {
+  const safePercent = percent == null ? 0 : Math.max(0, Math.min(100, percent));
+  return (
+    <div className="rounded-xl border border-slate-700/70 bg-slate-950/40 p-3">
+      <div className="flex items-center justify-between gap-2">
+        <span className="flex items-center gap-2 text-xs font-semibold uppercase text-slate-400">
+          {icon}
+          {label}
+        </span>
+        <span className="font-mono text-sm font-bold text-white">
+          {percent == null ? '—' : `${percent.toFixed(1)}%`}
+        </span>
+      </div>
+      <div className="mt-2 h-2 overflow-hidden rounded-full bg-slate-700">
+        <div
+          className={`h-full rounded-full transition-all ${usageColor(safePercent)}`}
+          style={{ width: `${safePercent}%` }}
+        />
+      </div>
+      {detail && <p className="mt-1.5 text-xs text-slate-500">{detail}</p>}
+    </div>
+  );
+}
+
+function LocalMachineCard({
+  host,
+  isError,
+}: {
+  host: LocalHostHealth | undefined;
+  isError: boolean;
+}) {
+  const { t } = useTranslation();
+  const hostOnline = Boolean(host) && !isError;
+  const internetOnline = host?.internet.online ?? false;
 
   return (
-    <div className={`rounded-2xl border p-4 ${styles}`}>
-      <div className="flex items-start justify-between gap-2">
-        <div className="min-w-0">
+    <div
+      className={`mb-4 rounded-2xl border p-4 ${
+        hostOnline ? 'border-cyan-500/40 bg-cyan-500/10' : 'border-red-500/60 bg-red-500/10'
+      }`}
+    >
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="flex min-w-0 items-start gap-3">
+          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-cyan-500/20 text-cyan-300">
+            <Server className="h-5 w-5" />
+          </span>
+          <div className="min-w-0">
+            <p className="text-base font-bold text-white">
+              {host?.hostname ?? t('statusWall.localMachine')}
+            </p>
+            <p className="truncate text-xs text-slate-400">
+              {host ? `${host.os} · ${host.arch}` : t('statusWall.hostUnavailable')}
+            </p>
+          </div>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <span
+            className={`rounded-full px-2.5 py-1 text-xs font-bold uppercase ${
+              hostOnline
+                ? 'bg-emerald-500/20 text-emerald-300'
+                : 'bg-red-500/25 text-red-200'
+            }`}
+          >
+            {hostOnline ? t('statusWall.online') : t('statusWall.offline')}
+          </span>
+          <span
+            className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold ${
+              internetOnline
+                ? 'bg-emerald-500/20 text-emerald-300'
+                : 'bg-red-500/20 text-red-200'
+            }`}
+            title={host?.internet.error ?? undefined}
+          >
+            {internetOnline ? <Wifi className="h-3.5 w-3.5" /> : <WifiOff className="h-3.5 w-3.5" />}
+            {t('statusWall.internet')}: {internetOnline ? t('statusWall.online') : t('statusWall.offline')}
+            {host?.internet.latency_ms != null ? ` · ${host.internet.latency_ms} ms` : ''}
+          </span>
+        </div>
+      </div>
+
+      {host && (
+        <>
+          <div className="mt-4 grid gap-3 sm:grid-cols-3">
+            <ResourceMetric
+              icon={<Cpu className="h-4 w-4" />}
+              label={t('statusWall.cpu')}
+              percent={host.cpu_usage_percent}
+            />
+            <ResourceMetric
+              icon={<MemoryStick className="h-4 w-4" />}
+              label={t('statusWall.memory')}
+              percent={host.memory.used_percent}
+              detail={`${formatBytes(host.memory.used_bytes)} / ${formatBytes(host.memory.total_bytes)}`}
+            />
+            <ResourceMetric
+              icon={<HardDrive className="h-4 w-4" />}
+              label={t('statusWall.disk')}
+              percent={host.disk?.used_percent ?? null}
+              detail={
+                host.disk
+                  ? `${formatBytes(host.disk.used_bytes)} / ${formatBytes(host.disk.total_bytes)} · ${host.disk.path}`
+                  : undefined
+              }
+            />
+          </div>
+          <p className="mt-3 text-xs text-slate-400">
+            {t('statusWall.uptime')}: {formatUptime(host.uptime_seconds)}
+          </p>
+        </>
+      )}
+    </div>
+  );
+}
+
+function SystemTile({ system }: { system: SystemHealth }) {
+  const { t } = useTranslation();
+  const state = statusColor(system);
+  const isLocal = system.host === 'localhost' || system.host === '127.0.0.1';
+  const styles = {
+    online: 'border-emerald-400/60 bg-gradient-to-br from-emerald-500/20 to-emerald-950/30 shadow-emerald-950/30',
+    offline: 'border-red-500/70 bg-gradient-to-br from-red-500/20 to-red-950/30 shadow-red-950/30',
+    unknown: 'border-slate-600/60 bg-gradient-to-br from-slate-700/30 to-slate-950/30',
+  }[state];
+  const indicator = {
+    online: 'bg-emerald-400 shadow-[0_0_18px_rgba(52,211,153,0.9)]',
+    offline: 'bg-red-500 shadow-[0_0_18px_rgba(239,68,68,0.9)] animate-pulse',
+    unknown: 'bg-slate-500',
+  }[state];
+  const stateLabel =
+    state === 'online'
+      ? t('statusWall.online')
+      : state === 'offline'
+        ? t('statusWall.offline')
+        : t('statusWall.unknown');
+
+  return (
+    <div className={`relative overflow-hidden rounded-2xl border p-4 shadow-lg ${styles}`}>
+      <div
+        className={`absolute inset-x-0 bottom-0 h-1 ${
+          state === 'online'
+            ? 'bg-emerald-400'
+            : state === 'offline'
+              ? 'bg-red-500'
+              : 'bg-slate-600'
+        }`}
+      />
+
+      <div className="flex items-start gap-3">
+        <div className="relative flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-slate-950/50">
+          <Database
+            className={`h-6 w-6 ${
+              state === 'online'
+                ? 'text-emerald-300'
+                : state === 'offline'
+                  ? 'text-red-300'
+                  : 'text-slate-400'
+            }`}
+          />
+          <span className={`absolute -right-1 -top-1 h-4 w-4 rounded-full border-2 border-slate-950 ${indicator}`} />
+        </div>
+        <div className="min-w-0 flex-1">
           <p className="truncate text-base font-bold text-white">{system.name}</p>
-          <p className="truncate text-xs text-slate-400">
-            {system.database_name ?? system.host ?? system.system_key}
+          <p className="truncate text-xs text-slate-400">{system.database_name ?? system.system_key}</p>
+          <p className="mt-1 truncate font-mono text-[11px] text-slate-500">
+            {system.host ?? '—'}{system.port ? `:${system.port}` : ''}
           </p>
         </div>
-        {state === 'online' ? (
-          <CheckCircle2 className="h-6 w-6 shrink-0 text-emerald-400" />
-        ) : state === 'offline' ? (
-          <XCircle className="h-6 w-6 shrink-0 text-red-400" />
-        ) : (
-          <AlertTriangle className="h-6 w-6 shrink-0 text-slate-400" />
-        )}
       </div>
 
-      <div className="mt-3 flex items-center justify-between">
-        <span
-          className={`rounded-full px-2.5 py-0.5 text-xs font-bold uppercase tracking-wide ${
-            state === 'online'
-              ? 'bg-emerald-500/20 text-emerald-300'
-              : state === 'offline'
-                ? 'bg-red-500/25 text-red-200'
-                : 'bg-slate-600/30 text-slate-300'
-          }`}
-        >
-          {state}
+      <div className="mt-4 flex items-center justify-between gap-2">
+        <div className="flex flex-wrap gap-1.5">
+          <span
+            className={`rounded-full px-2.5 py-1 text-xs font-extrabold uppercase tracking-wide ${
+              state === 'online'
+                ? 'bg-emerald-400/20 text-emerald-200'
+                : state === 'offline'
+                  ? 'bg-red-500/25 text-red-100'
+                  : 'bg-slate-600/30 text-slate-300'
+            }`}
+          >
+            {stateLabel}
+          </span>
+          <span className="rounded-full bg-slate-800/80 px-2 py-1 text-[10px] font-bold uppercase text-slate-300">
+            {isLocal ? t('statusWall.local') : t('statusWall.remote')}
+          </span>
+          {system.is_production && (
+            <span className="rounded-full bg-amber-500/20 px-2 py-1 text-[10px] font-bold uppercase text-amber-300">
+              PROD
+            </span>
+          )}
+        </div>
+        <span className="shrink-0 font-mono text-sm font-bold text-white">
+          {state === 'online' && system.response_ms != null ? `${system.response_ms} ms` : '—'}
         </span>
-        {system.is_production && (
-          <span className="rounded-full bg-amber-500/20 px-2 py-0.5 text-[10px] font-bold uppercase text-amber-300">
-            PROD
-          </span>
-        )}
       </div>
 
-      <div className="mt-2 text-xs text-slate-400">
-        {state === 'online' && system.response_ms != null ? (
-          <span>{system.response_ms} ms</span>
-        ) : system.last_error ? (
-          <span className="line-clamp-2 text-red-300" title={system.last_error}>
-            {system.last_error}
-          </span>
-        ) : (
-          <span>—</span>
-        )}
+      {state !== 'online' && system.last_error && (
+        <p className="mt-3 line-clamp-2 text-xs text-red-200" title={system.last_error}>
+          {system.last_error}
+        </p>
+      )}
+      <div className="mt-3 text-[10px] text-slate-500">
+        {t('statusWall.checked')}:{' '}
+        {system.last_checked_at ? new Date(system.last_checked_at).toLocaleTimeString() : '—'}
       </div>
     </div>
   );
@@ -127,6 +311,7 @@ export function StatusWallPage() {
   const refreshIntervalMs = useStatusWallStore((state) => state.refreshIntervalMs);
   const setRefreshIntervalMs = useStatusWallStore((state) => state.setRefreshIntervalMs);
 
+  const hostQuery = useLocalHostHealth(refreshIntervalMs);
   const systemsQuery = useSystemsHealth(refreshIntervalMs);
   const mondayQuery = useMondayWall(refreshIntervalMs);
 
@@ -150,7 +335,16 @@ export function StatusWallPage() {
   }
 
   const systems = systemsQuery.data ?? [];
+  const onlineSystems = systems.filter((system) => statusColor(system) === 'online');
   const offlineSystems = systems.filter((system) => statusColor(system) === 'offline');
+  const host = hostQuery.data;
+  const hostResourceAlert = Boolean(
+    host &&
+      ((host.cpu_usage_percent ?? 0) >= 90 ||
+        host.memory.used_percent >= 90 ||
+        (host.disk?.used_percent ?? 0) >= 90),
+  );
+  const hostAlert = hostQuery.isError || Boolean(host && !host.internet.online) || hostResourceAlert;
 
   const boards = mondayQuery.data?.boards ?? [];
   const pendingItems = useMemo(
@@ -168,12 +362,14 @@ export function StatusWallPage() {
   const totalPending = pendingItems.length;
   const totalDone = boards.reduce((sum, board) => sum + board.counts.done, 0);
 
-  const hasAlert = offlineSystems.length > 0 || urgentItems.length > 0;
-  const lastUpdated = systemsQuery.dataUpdatedAt
-    ? new Date(systemsQuery.dataUpdatedAt)
+  const hasAlert = hostAlert || offlineSystems.length > 0 || urgentItems.length > 0;
+  const lastUpdatedAt = Math.max(hostQuery.dataUpdatedAt, systemsQuery.dataUpdatedAt);
+  const lastUpdated = lastUpdatedAt
+    ? new Date(lastUpdatedAt)
     : null;
 
   function refreshAll() {
+    void hostQuery.refetch();
     void systemsQuery.refetch();
     void mondayQuery.refetch();
   }
@@ -226,7 +422,11 @@ export function StatusWallPage() {
             className="flex h-10 items-center gap-1.5 rounded-xl border border-slate-700 bg-slate-900 px-3 text-sm font-semibold text-slate-200 hover:bg-slate-800"
           >
             <RefreshCw
-              className={`h-4 w-4 ${systemsQuery.isFetching || mondayQuery.isFetching ? 'animate-spin' : ''}`}
+              className={`h-4 w-4 ${
+                hostQuery.isFetching || systemsQuery.isFetching || mondayQuery.isFetching
+                  ? 'animate-spin'
+                  : ''
+              }`}
             />
             {t('statusWall.refresh')}
           </button>
@@ -246,6 +446,16 @@ export function StatusWallPage() {
       {hasAlert && (
         <div className="mt-4 rounded-2xl border border-red-500/50 bg-red-500/10 px-5 py-3 text-red-200">
           <div className="flex flex-wrap items-center gap-x-6 gap-y-1 text-sm font-semibold">
+            {hostAlert && (
+              <span className="flex items-center gap-2">
+                <Server className="h-4 w-4" />
+                {hostQuery.isError
+                  ? t('statusWall.hostUnavailable')
+                  : !host?.internet.online
+                    ? t('statusWall.internetDown')
+                    : t('statusWall.hostResourcesHigh')}
+              </span>
+            )}
             {offlineSystems.length > 0 && (
               <span className="flex items-center gap-2">
                 <XCircle className="h-4 w-4" />
@@ -272,13 +482,15 @@ export function StatusWallPage() {
               {t('statusWall.systems')}
             </h2>
             <span className="text-sm text-slate-400">
-              {systems.length - offlineSystems.length}/{systems.length} {t('statusWall.online')}
+              {onlineSystems.length}/{systems.length} {t('statusWall.online')}
             </span>
           </div>
 
+          <LocalMachineCard host={host} isError={hostQuery.isError} />
+
           {systemsQuery.isError ? (
             <p className="rounded-2xl border border-red-500/40 bg-red-500/10 p-6 text-sm text-red-200">
-              {t('statusWall.systemsError')}
+              {t('statusWall.systemsError')}: {extractErrorMessage(systemsQuery.error)}
             </p>
           ) : systems.length === 0 ? (
             <p className="rounded-2xl border border-slate-800 bg-slate-900 p-6 text-sm text-slate-400">

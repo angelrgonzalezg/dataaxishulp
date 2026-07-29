@@ -77,6 +77,16 @@ const systems: SeedSystem[] = [
     databaseName: 'Kadaster-BDMigration',
   },
   {
+    systemKey: 'kadaster_atl_prod',
+    name: 'Kadaster ATL (PROD)',
+    description: 'Production KadasterMigrationATL database on SRV-DEV16',
+    dialect: 'kadaster',
+    envVarName: 'SYSTEM_DB_KADASTER_ATL_PROD_URL',
+    host: '200.6.147.70',
+    port: 1433,
+    databaseName: 'KadasterMigrationATL',
+  },
+  {
     systemKey: 'dlv_aruba',
     name: 'DLV Aruba (Local)',
     description: 'Local Tereno / DLV test database (tereno_dev_AG_local)',

@@ -4,10 +4,11 @@ import { roleHasPermission, type Permission } from '../config/permissions';
 import { UnauthorizedError, ForbiddenError } from '../utils/AppError';
 import type { UserRole } from '../types/database.types';
 
-const PUBLIC_PATHS = ['/health', '/auth/login', '/auth/refresh'];
+const PUBLIC_PATHS = new Set(['/health', '/auth/login', '/auth/refresh']);
 
 function isPublicPath(path: string): boolean {
-  return PUBLIC_PATHS.some((p) => path.endsWith(p));
+  // Exact match only — endsWith('/health') incorrectly treated /systems/health as public.
+  return PUBLIC_PATHS.has(path);
 }
 
 export function authenticate(req: Request, _res: Response, next: NextFunction): void {

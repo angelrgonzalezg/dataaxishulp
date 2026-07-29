@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { requirePermission } from '../../middleware/auth';
 import { validate } from '../../middleware/validate';
 import { successResponse } from '../../types/api.types';
+import { getLocalHostHealth } from './hostHealth.service';
 import * as systemsService from './systems.service';
 
 const router = Router();
@@ -24,6 +25,15 @@ router.get('/health', requirePermission('systems.view'), async (_req, res, next)
   try {
     const systems = await systemsService.checkAllSystemsHealth();
     res.json(successResponse(systems));
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.get('/host-health', requirePermission('systems.view'), async (_req, res, next) => {
+  try {
+    const host = await getLocalHostHealth();
+    res.json(successResponse(host));
   } catch (error) {
     next(error);
   }

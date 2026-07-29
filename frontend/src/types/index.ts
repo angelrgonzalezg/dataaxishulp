@@ -62,6 +62,30 @@ export interface SystemHealth extends SystemConnection {
   response_ms: number | null;
 }
 
+export interface HostResourceHealth {
+  total_bytes: number;
+  used_bytes: number;
+  free_bytes: number;
+  used_percent: number;
+}
+
+export interface LocalHostHealth {
+  online: true;
+  hostname: string;
+  os: string;
+  arch: string;
+  uptime_seconds: number;
+  cpu_usage_percent: number | null;
+  memory: HostResourceHealth;
+  disk: (HostResourceHealth & { path: string }) | null;
+  internet: {
+    online: boolean;
+    latency_ms: number | null;
+    error: string | null;
+  };
+  checked_at: string;
+}
+
 export interface IssueUserSummary {
   user_id: number;
   username: string;

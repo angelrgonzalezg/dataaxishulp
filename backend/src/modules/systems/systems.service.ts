@@ -107,10 +107,36 @@ export async function testSystemConnection(systemId: number): Promise<SystemResp
   return mapSystem(updated);
 }
 
+const HEALTH_PROBE_CONCURRENCY = 3;
+
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  concurrency: number,
+  worker: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let nextIndex = 0;
+
+  async function runWorker(): Promise<void> {
+    while (nextIndex < items.length) {
+      const current = nextIndex;
+      nextIndex += 1;
+      results[current] = await worker(items[current]);
+    }
+  }
+
+  const workers = Array.from(
+    { length: Math.min(concurrency, Math.max(items.length, 1)) },
+    () => runWorker(),
+  );
+  await Promise.all(workers);
+  return results;
+}
+
 /**
- * Live connectivity probe for every active system connection, run in parallel.
+ * Live connectivity probe for every active system connection.
+ * Uses limited concurrency so ODBC/VPN probes don't stall the Status Wall.
  * Persists last-known status and returns each system with a response time.
- * Intended for the status wall / ops board polling.
  */
 export async function checkAllSystemsHealth(): Promise<SystemHealth[]> {
   const rows = await prisma.systemConnection.findMany({
@@ -118,8 +144,8 @@ export async function checkAllSystemsHealth(): Promise<SystemHealth[]> {
     orderBy: { name: 'asc' },
   });
 
-  const results = await Promise.all(
-    rows.map(async (row): Promise<SystemHealth> => {
+  return mapWithConcurrency(rows, HEALTH_PROBE_CONCURRENCY, async (row): Promise<SystemHealth> => {
+    try {
       const url = resolveSystemConnectionUrl(row.envVarName);
       if (!url) {
         const updated = await prisma.systemConnection.update({
@@ -145,8 +171,28 @@ export async function checkAllSystemsHealth(): Promise<SystemHealth[]> {
         },
       });
       return { ...mapSystem(updated), response_ms: result.ok ? elapsed : null };
-    }),
-  );
-
-  return results;
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : 'Unexpected health-check failure';
+      try {
+        const updated = await prisma.systemConnection.update({
+          where: { systemId: row.systemId },
+          data: {
+            lastCheckedAt: new Date(),
+            lastStatus: 'offline',
+            lastError: message.slice(0, 500),
+          },
+        });
+        return { ...mapSystem(updated), response_ms: null };
+      } catch {
+        return {
+          ...mapSystem(row),
+          response_ms: null,
+          last_status: 'offline',
+          last_error: message.slice(0, 500),
+          last_checked_at: new Date(),
+        };
+      }
+    }
+  });
 }
