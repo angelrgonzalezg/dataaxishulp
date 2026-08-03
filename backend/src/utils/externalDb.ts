@@ -1,9 +1,32 @@
 import type { ConnectionPool } from 'mssql';
 import { prisma } from '../config/db';
 import { AppError, NotFoundError, ValidationError } from './AppError';
-import { buildMssqlConfig, resolveSystemConnectionUrl } from './systemConnection';
+import {
+  activateMssqlDriver,
+  buildMssqlConfig,
+  resolveSystemConnectionUrl,
+  type MssqlDriverKind,
+} from './systemConnection';
+import {
+  closeTediousIsolated,
+  executeTediousProcedureIsolated,
+  queryTediousIsolated,
+} from './tediousIsolate';
 
-const pools = new Map<string, ConnectionPool>();
+type PooledSystem = {
+  pool: ConnectionPool;
+  driverKind: 'native';
+  url: string;
+};
+
+type IsolatedTediousSystem = {
+  driverKind: 'tedious';
+  url: string;
+};
+
+type SystemEntry = PooledSystem | IsolatedTediousSystem;
+
+const pools = new Map<string, SystemEntry>();
 
 export function isConnectionError(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error);
@@ -32,18 +55,13 @@ function connectionErrorMessage(error: unknown): string {
   return String(error);
 }
 
-export async function getSystemPool(systemKey: string): Promise<ConnectionPool> {
-  const existing = pools.get(systemKey);
-  if (existing?.connected) {
-    return existing;
-  }
-
-  // Drop stale/disconnected pools so we always retry cleanly.
-  if (existing) {
-    pools.delete(systemKey);
-    await existing.close().catch(() => undefined);
-  }
-
+async function resolveSystemUrl(systemKey: string): Promise<{
+  name: string;
+  envVarName: string;
+  url: string;
+  driverKind: MssqlDriverKind;
+  summary: string;
+}> {
   const system = await prisma.systemConnection.findUnique({
     where: { systemKey },
   });
@@ -58,30 +76,89 @@ export async function getSystemPool(systemKey: string): Promise<ConnectionPool> 
     );
   }
 
-  const { driver, config, summary } = buildMssqlConfig(url);
+  const { driverKind, summary } = buildMssqlConfig(url);
+  return { name: system.name, envVarName: system.envVarName, url, driverKind, summary };
+}
+
+async function getSystemEntry(systemKey: string): Promise<SystemEntry> {
+  const existing = pools.get(systemKey);
+  if (existing?.driverKind === 'tedious') {
+    return existing;
+  }
+  if (existing?.driverKind === 'native' && existing.pool.connected) {
+    activateMssqlDriver('native');
+    return existing;
+  }
+
+  if (existing?.driverKind === 'native') {
+    pools.delete(systemKey);
+    await existing.pool.close().catch(() => undefined);
+  }
+
+  const resolved = await resolveSystemUrl(systemKey);
+
+  // Tedious must never load in the main process alongside msnodesqlv8.
+  if (resolved.driverKind === 'tedious') {
+    const entry: IsolatedTediousSystem = { driverKind: 'tedious', url: resolved.url };
+    pools.set(systemKey, entry);
+    return entry;
+  }
+
   try {
-    const connectPromise = new driver.ConnectionPool(config).connect();
+    const built = buildMssqlConfig(resolved.url);
+    if (!built.driver || !built.config) {
+      throw new Error('Native driver config missing');
+    }
+    const nativeDriver = built.driver;
+    const nativeConfig = built.config;
+    activateMssqlDriver('native');
+    const connectPromise = new nativeDriver.ConnectionPool(nativeConfig).connect();
     const pool = await Promise.race([
       connectPromise,
       new Promise<never>((_resolve, reject) => {
         setTimeout(() => {
           reject(
             new Error(
-              `Connect ${summary} timed out. Check VPN/firewall and SQL host reachability.`,
+              `Connect ${built.summary} timed out. Check VPN/firewall and SQL host reachability.`,
             ),
           );
-        }, (config.connectionTimeout ?? 8000) + 1000);
+        }, (nativeConfig.connectionTimeout ?? 8000) + 1000);
       }),
     ]);
-    pools.set(systemKey, pool);
-    return pool;
+    const entry: PooledSystem = { pool, driverKind: 'native', url: resolved.url };
+    pools.set(systemKey, entry);
+    return entry;
   } catch (error) {
     pools.delete(systemKey);
     throw new AppError(
       503,
-      `Cannot connect to ${system.name} (${systemKey}) via ${system.envVarName} [${summary}]: ${connectionErrorMessage(error)}`,
+      `Cannot connect to ${resolved.name} (${systemKey}) via ${resolved.envVarName} [${resolved.summary}]: ${connectionErrorMessage(error)}`,
       'CONNECTION_ERROR',
     );
+  }
+}
+
+/** @deprecated Prefer querySystem / executeSystem — kept for callers that need a native pool. */
+export async function getSystemPool(systemKey: string): Promise<ConnectionPool> {
+  const entry = await getSystemEntry(systemKey);
+  if (entry.driverKind !== 'native') {
+    throw new AppError(
+      500,
+      `System ${systemKey} uses isolated Tedious driver; use querySystem/executeSystem instead of getSystemPool`,
+      'DRIVER_ISOLATION',
+    );
+  }
+  return entry.pool;
+}
+
+async function dropSystemEntry(systemKey: string): Promise<void> {
+  const stale = pools.get(systemKey);
+  if (!stale) return;
+  pools.delete(systemKey);
+  if (stale.driverKind === 'native') {
+    await stale.pool.close().catch(() => undefined);
+  } else {
+    await closeTediousIsolated(systemKey);
   }
 }
 
@@ -91,9 +168,14 @@ async function runSystemQuery<T extends Record<string, unknown> = Record<string,
   params: Record<string, unknown> = {},
 ): Promise<{ rows: T[]; rowsAffected: number }> {
   try {
-    const pool = await getSystemPool(systemKey);
-    const request = pool.request();
+    const entry = await getSystemEntry(systemKey);
 
+    if (entry.driverKind === 'tedious') {
+      return queryTediousIsolated<T>(systemKey, entry.url, queryText, params);
+    }
+
+    activateMssqlDriver('native');
+    const request = entry.pool.request();
     for (const [key, value] of Object.entries(params)) {
       request.input(key, value as string | number | boolean | Date | null | Buffer);
     }
@@ -106,12 +188,7 @@ async function runSystemQuery<T extends Record<string, unknown> = Record<string,
   } catch (error) {
     if (error instanceof AppError) throw error;
     if (isConnectionError(error)) {
-      // Force reconnect on next attempt.
-      const stale = pools.get(systemKey);
-      if (stale) {
-        pools.delete(systemKey);
-        await stale.close().catch(() => undefined);
-      }
+      await dropSystemEntry(systemKey);
       throw new AppError(
         503,
         `Database connection failed for ${systemKey}: ${connectionErrorMessage(error)}`,
@@ -139,6 +216,66 @@ export async function executeSystem(
 ): Promise<{ rowsAffected: number }> {
   const { rowsAffected } = await runSystemQuery(systemKey, queryText, params);
   return { rowsAffected };
+}
+
+/**
+ * Execute a stored procedure and return its first result set + integer return value.
+ * Prefer this over ad-hoc EXEC + SELECT @rv (ODBC often only exposes one recordset).
+ */
+export async function executeSystemProcedure<
+  T extends Record<string, unknown> = Record<string, unknown>,
+>(
+  systemKey: string,
+  procedureName: string,
+  params: Record<string, unknown> = {},
+): Promise<{
+  rows: T[];
+  recordsets: T[][];
+  returnValue: number | null;
+  rowsAffected: number;
+}> {
+  try {
+    const entry = await getSystemEntry(systemKey);
+
+    if (entry.driverKind === 'tedious') {
+      return executeTediousProcedureIsolated<T>(systemKey, entry.url, procedureName, params);
+    }
+
+    activateMssqlDriver('native');
+    const request = entry.pool.request();
+    for (const [key, value] of Object.entries(params)) {
+      request.input(key, value as string | number | boolean | Date | null | Buffer);
+    }
+
+    const result = await request.execute(procedureName);
+    const affected = Array.isArray(result.rowsAffected)
+      ? result.rowsAffected.reduce((sum, n) => sum + (Number(n) || 0), 0)
+      : Number(result.rowsAffected ?? 0);
+    const returnRaw = result.returnValue;
+    const returnValue =
+      typeof returnRaw === 'number' && Number.isFinite(returnRaw) ? returnRaw : null;
+    const recordsets = ((result.recordsets as T[][] | undefined) ?? []).map(
+      (set) => set ?? [],
+    );
+
+    return {
+      rows: (result.recordset ?? recordsets[0] ?? []) as T[],
+      recordsets,
+      returnValue,
+      rowsAffected: affected,
+    };
+  } catch (error) {
+    if (error instanceof AppError) throw error;
+    if (isConnectionError(error)) {
+      await dropSystemEntry(systemKey);
+      throw new AppError(
+        503,
+        `Database connection failed for ${systemKey}: ${connectionErrorMessage(error)}`,
+        'CONNECTION_ERROR',
+      );
+    }
+    throw error;
+  }
 }
 
 export function serializeRow(row: Record<string, unknown>): Record<string, unknown> {

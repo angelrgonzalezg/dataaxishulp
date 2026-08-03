@@ -4,7 +4,7 @@ import { requirePermission } from '../../middleware/auth';
 import { validate } from '../../middleware/validate';
 import { successResponse } from '../../types/api.types';
 import { ValidationError } from '../../utils/AppError';
-import { DEFAULT_SYSTEM_KEY } from './support.frames';
+import { DEFAULT_SYSTEM_KEY, resolveSystemDialect } from './support.frames';
 import {
   lookupOrderById,
   lookupOrderByKenmerk,
@@ -17,6 +17,23 @@ import {
   listLegalFacts,
   updateDeedLegalFact,
 } from './support.deed.mutate.service';
+import { reopenBestelling } from './support.order.reopen.service';
+import { voidOrder } from './support.order.void.service';
+import {
+  changeOrderParcel,
+  listOrderParcelLinks,
+  resolveParcelByEsri,
+} from './support.order.change.parcel.service';
+import {
+  changeOrderDeed,
+  listOrderDeedLinks,
+  resolveDeedByTitle,
+} from './support.order.change.deed.service';
+import {
+  lookupRetireSubjectCandidates,
+  retireSubjectFromDeed,
+  correctOwnershipShare,
+} from './support.retire.subject.service';
 import { buildObjectInzage } from './inzage.service';
 import { buildSubjectInzage } from './inzage.subject.service';
 import type { InzageObjectVariant, InzageSubjectVariant } from './inzage.types';
@@ -56,6 +73,89 @@ const updateDeedLegalFactSchema = z.object({
   systemKey: z.string().min(1),
   legalFactId: z.coerce.number().int().positive(),
   confirm: z.literal(true),
+});
+
+const reopenBestellingSchema = z.object({
+  systemKey: z.string().min(1),
+  previewOnly: z.boolean(),
+  confirm: z.literal(true).optional(),
+});
+
+const voidOrderSchema = z.object({
+  systemKey: z.string().min(1),
+  previewOnly: z.boolean(),
+  confirm: z.literal(true).optional(),
+  acknowledgeRisk: z.boolean().optional(),
+});
+
+const changeOrderParcelSchema = z.object({
+  systemKey: z.string().min(1),
+  linkId: z.coerce.number().int().positive(),
+  newParcelEsri: z.string().min(1).optional(),
+  newParcelId: z.coerce.number().int().positive().optional(),
+  previewOnly: z.boolean(),
+  confirm: z.literal(true).optional(),
+});
+
+const changeOrderDeedSchema = z.object({
+  systemKey: z.string().min(1),
+  linkId: z.coerce.number().int().positive(),
+  newRegisterTitle: z.string().min(1).optional(),
+  newDeedId: z.coerce.number().int().positive().optional(),
+  previewOnly: z.boolean(),
+  confirm: z.literal(true).optional(),
+});
+
+const parcelEsriSearchSchema = z.object({
+  systemKey: z.string().min(1).optional(),
+  esri: z.string().min(1),
+});
+
+const deedTitleSearchSchema = z.object({
+  systemKey: z.string().min(1).optional(),
+  title: z.string().min(1),
+});
+
+const retireSubjectLookupSchema = z.object({
+  systemKey: z.string().min(1).optional(),
+  registerTitle: z.string().min(1),
+  parcelEsri: z.string().min(1),
+});
+
+const retireSubjectSchema = z.object({
+  systemKey: z.string().min(1),
+  deedDetailIds: z.array(z.coerce.number().int().positive()).min(1),
+  previewOnly: z.boolean(),
+  confirm: z.literal(true).optional(),
+});
+
+const correctOwnershipShareSchema = z.object({
+  systemKey: z.string().min(1),
+  shareNumerator: z.coerce.number().int().nonnegative(),
+  shareDenominator: z.coerce.number().int().positive(),
+  previewOnly: z.boolean(),
+  confirm: z.literal(true).optional(),
+  contextCandidates: z
+    .array(
+      z.object({
+        deed_detail_id: z.number().int().positive(),
+        deed_id: z.number().int(),
+        register_title: z.string(),
+        parcel_id: z.number().int(),
+        parcel_esri: z.string().nullable(),
+        subject_id: z.number().int(),
+        subject_name: z.string(),
+        share_numerator: z.number().nullable(),
+        share_denominator: z.number().nullable(),
+        is_retired: z.boolean(),
+        legal_fact_type_id: z.number().nullable(),
+      }),
+    )
+    .optional(),
+});
+
+const deedDetailParamsSchema = z.object({
+  deedDetailId: z.coerce.number().int().positive(),
 });
 
 router.get(
@@ -99,6 +199,23 @@ router.get(
       }
 
       throw new ValidationError('Provide kenmerk or title (Register-Deel-Nummer)');
+    } catch (error) {
+      next(error);
+    }
+  },
+);
+
+router.get(
+  '/parcels/search-esri',
+  requirePermission('support.view'),
+  validate(parcelEsriSearchSchema, 'query'),
+  async (req, res, next) => {
+    try {
+      const query = req.query as unknown as z.infer<typeof parcelEsriSearchSchema>;
+      const systemKey = query.systemKey?.trim() || DEFAULT_SYSTEM_KEY;
+      const dialect = await resolveSystemDialect(systemKey);
+      const data = await resolveParcelByEsri(systemKey, dialect, query.esri);
+      res.json(successResponse(data));
     } catch (error) {
       next(error);
     }
@@ -272,6 +389,288 @@ router.post(
         updatedBy: req.user?.username ?? 'dataaxis-hulp',
       });
       res.json(successResponse(data));
+    } catch (error) {
+      next(error);
+    }
+  },
+);
+
+router.post(
+  '/orders/:orderId/reopen-bestelling',
+  requirePermission('support.edit'),
+  validate(orderParamsSchema, 'params'),
+  validate(reopenBestellingSchema, 'body'),
+  async (req, res, next) => {
+    try {
+      const body = req.body as z.infer<typeof reopenBestellingSchema>;
+      if (!body.previewOnly && body.confirm !== true) {
+        throw new ValidationError(
+          'Confirmation required. Set confirm=true to apply Reopen Bestelling.',
+        );
+      }
+      const data = await reopenBestelling({
+        orderId: Number(req.params.orderId),
+        systemKey: body.systemKey,
+        previewOnly: body.previewOnly,
+        confirm: body.confirm,
+      });
+      res.json(
+        successResponse(
+          data,
+          body.previewOnly ? 'Reopen Bestelling preview' : 'Reopen Bestelling applied',
+        ),
+      );
+    } catch (error) {
+      next(error);
+    }
+  },
+);
+
+router.post(
+  '/orders/:orderId/void',
+  requirePermission('support.edit'),
+  validate(orderParamsSchema, 'params'),
+  validate(voidOrderSchema, 'body'),
+  async (req, res, next) => {
+    try {
+      const body = req.body as z.infer<typeof voidOrderSchema>;
+      if (!body.previewOnly && body.confirm !== true) {
+        throw new ValidationError(
+          'Confirmation required. Set confirm=true to void the order.',
+        );
+      }
+      const data = await voidOrder({
+        orderId: Number(req.params.orderId),
+        systemKey: body.systemKey,
+        previewOnly: body.previewOnly,
+        confirm: body.confirm,
+        acknowledgeRisk: body.acknowledgeRisk,
+        updatedBy: req.user?.username ?? 'dataaxis-hulp',
+      });
+      res.json(
+        successResponse(
+          data,
+          body.previewOnly ? 'Void order preview' : 'Order voided',
+        ),
+      );
+    } catch (error) {
+      next(error);
+    }
+  },
+);
+
+router.get(
+  '/orders/:orderId/parcel-links',
+  requirePermission('support.view'),
+  validate(orderParamsSchema, 'params'),
+  validate(systemKeySchema, 'query'),
+  async (req, res, next) => {
+    try {
+      const systemKey =
+        (req.query.systemKey as string | undefined)?.trim() || DEFAULT_SYSTEM_KEY;
+      const data = await listOrderParcelLinks({
+        orderId: Number(req.params.orderId),
+        systemKey,
+      });
+      res.json(successResponse(data));
+    } catch (error) {
+      next(error);
+    }
+  },
+);
+
+router.post(
+  '/orders/:orderId/change-parcel',
+  requirePermission('support.edit'),
+  validate(orderParamsSchema, 'params'),
+  validate(changeOrderParcelSchema, 'body'),
+  async (req, res, next) => {
+    try {
+      const body = req.body as z.infer<typeof changeOrderParcelSchema>;
+      if (!body.previewOnly && body.confirm !== true) {
+        throw new ValidationError(
+          'Confirmation required. Set confirm=true to change the parcel on this order.',
+        );
+      }
+      if (!body.newParcelEsri && !body.newParcelId) {
+        throw new ValidationError('Provide newParcelEsri or newParcelId');
+      }
+      const data = await changeOrderParcel({
+        orderId: Number(req.params.orderId),
+        systemKey: body.systemKey,
+        linkId: body.linkId,
+        newParcelEsri: body.newParcelEsri,
+        newParcelId: body.newParcelId,
+        previewOnly: body.previewOnly,
+        confirm: body.confirm,
+        updatedBy: req.user?.username ?? 'dataaxis-hulp',
+      });
+      res.json(
+        successResponse(
+          data,
+          body.previewOnly ? 'Change parcel preview' : 'Order parcel updated',
+        ),
+      );
+    } catch (error) {
+      next(error);
+    }
+  },
+);
+
+router.get(
+  '/orders/:orderId/deed-links',
+  requirePermission('support.view'),
+  validate(orderParamsSchema, 'params'),
+  validate(systemKeySchema, 'query'),
+  async (req, res, next) => {
+    try {
+      const systemKey =
+        (req.query.systemKey as string | undefined)?.trim() || DEFAULT_SYSTEM_KEY;
+      const data = await listOrderDeedLinks({
+        orderId: Number(req.params.orderId),
+        systemKey,
+      });
+      res.json(successResponse(data));
+    } catch (error) {
+      next(error);
+    }
+  },
+);
+
+router.get(
+  '/deeds/search-title',
+  requirePermission('support.view'),
+  validate(deedTitleSearchSchema, 'query'),
+  async (req, res, next) => {
+    try {
+      const query = req.query as unknown as z.infer<typeof deedTitleSearchSchema>;
+      const systemKey = query.systemKey?.trim() || DEFAULT_SYSTEM_KEY;
+      const dialect = await resolveSystemDialect(systemKey);
+      const data = await resolveDeedByTitle(systemKey, dialect, query.title);
+      res.json(successResponse(data));
+    } catch (error) {
+      next(error);
+    }
+  },
+);
+
+router.post(
+  '/orders/:orderId/change-deed',
+  requirePermission('support.edit'),
+  validate(orderParamsSchema, 'params'),
+  validate(changeOrderDeedSchema, 'body'),
+  async (req, res, next) => {
+    try {
+      const body = req.body as z.infer<typeof changeOrderDeedSchema>;
+      if (!body.previewOnly && body.confirm !== true) {
+        throw new ValidationError(
+          'Confirmation required. Set confirm=true to change the deed on this order.',
+        );
+      }
+      if (!body.newRegisterTitle && !body.newDeedId) {
+        throw new ValidationError('Provide newRegisterTitle or newDeedId');
+      }
+      const data = await changeOrderDeed({
+        orderId: Number(req.params.orderId),
+        systemKey: body.systemKey,
+        linkId: body.linkId,
+        newRegisterTitle: body.newRegisterTitle,
+        newDeedId: body.newDeedId,
+        previewOnly: body.previewOnly,
+        confirm: body.confirm,
+        updatedBy: req.user?.username ?? 'dataaxis-hulp',
+      });
+      res.json(
+        successResponse(
+          data,
+          body.previewOnly ? 'Change deed preview' : 'Order deed updated',
+        ),
+      );
+    } catch (error) {
+      next(error);
+    }
+  },
+);
+
+router.get(
+  '/deed-details/retire-subject',
+  requirePermission('support.view'),
+  validate(retireSubjectLookupSchema, 'query'),
+  async (req, res, next) => {
+    try {
+      const query = req.query as unknown as z.infer<typeof retireSubjectLookupSchema>;
+      const data = await lookupRetireSubjectCandidates({
+        systemKey: query.systemKey,
+        registerTitle: query.registerTitle,
+        parcelEsri: query.parcelEsri,
+      });
+      res.json(successResponse(data));
+    } catch (error) {
+      next(error);
+    }
+  },
+);
+
+router.post(
+  '/deed-details/retire-subject',
+  requirePermission('support.edit'),
+  validate(retireSubjectSchema, 'body'),
+  async (req, res, next) => {
+    try {
+      const body = req.body as z.infer<typeof retireSubjectSchema>;
+      if (!body.previewOnly && body.confirm !== true) {
+        throw new ValidationError(
+          'Confirmation required. Set confirm=true to retire the selected subject row(s).',
+        );
+      }
+      const data = await retireSubjectFromDeed({
+        systemKey: body.systemKey,
+        deedDetailIds: body.deedDetailIds,
+        previewOnly: body.previewOnly,
+        confirm: body.confirm,
+        updatedBy: req.user?.username ?? 'dataaxis-hulp',
+      });
+      res.json(
+        successResponse(
+          data,
+          body.previewOnly ? 'Retire subject preview' : 'Subject retired from deed',
+        ),
+      );
+    } catch (error) {
+      next(error);
+    }
+  },
+);
+
+router.post(
+  '/deed-details/:deedDetailId/share',
+  requirePermission('support.edit'),
+  validate(deedDetailParamsSchema, 'params'),
+  validate(correctOwnershipShareSchema, 'body'),
+  async (req, res, next) => {
+    try {
+      const body = req.body as z.infer<typeof correctOwnershipShareSchema>;
+      if (!body.previewOnly && body.confirm !== true) {
+        throw new ValidationError(
+          'Confirmation required. Set confirm=true to update the ownership share.',
+        );
+      }
+      const data = await correctOwnershipShare({
+        systemKey: body.systemKey,
+        deedDetailId: Number(req.params.deedDetailId),
+        shareNumerator: body.shareNumerator,
+        shareDenominator: body.shareDenominator,
+        previewOnly: body.previewOnly,
+        confirm: body.confirm,
+        updatedBy: req.user?.username ?? 'dataaxis-hulp',
+        contextCandidates: body.contextCandidates,
+      });
+      res.json(
+        successResponse(
+          data,
+          body.previewOnly ? 'Ownership share preview' : 'Ownership share updated',
+        ),
+      );
     } catch (error) {
       next(error);
     }

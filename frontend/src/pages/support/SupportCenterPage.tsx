@@ -67,6 +67,19 @@ function extractDeedTypeAkteOptions(frames: TableFrame[] | undefined): DeedTypeA
     frames.find((item) => item.key === 'seed_deeds' || item.key === 'deeds');
   if (!frame) return [];
 
+  const registerById = new Map<number, string>();
+  const registersFrame = frames.find(
+    (item) => item.key === 'legal_fact_registers' || item.key === 'registers',
+  );
+  for (const row of registersFrame?.rows ?? []) {
+    const id =
+      asNullableNumber(row.id) ??
+      asNullableNumber(row.Id) ??
+      asNullableNumber(row.RegisterID);
+    const register = asNullableString(row.register) ?? asNullableString(row.Register);
+    if (id != null && register) registerById.set(id, register);
+  }
+
   const seen = new Set<number>();
   const options: DeedTypeAkteOption[] = [];
 
@@ -78,9 +91,15 @@ function extractDeedTypeAkteOptions(frames: TableFrame[] | undefined): DeedTypeA
     if (deedId == null || deedId <= 0 || seen.has(deedId)) continue;
     seen.add(deedId);
 
-    const register = asNullableString(row.register);
-    const segment = asNullableString(row.segment);
-    const number = asNullableString(row.number);
+    const registerFk =
+      asNullableNumber(row.legalFactRegisterId) ??
+      asNullableNumber(row.DeedTypeId) ??
+      asNullableNumber(row.deedTypeId);
+    const register =
+      asNullableString(row.register) ??
+      (registerFk != null ? registerById.get(registerFk) ?? null : null);
+    const segment = asNullableString(row.segment) ?? asNullableString(row.Segment);
+    const number = asNullableString(row.number) ?? asNullableString(row.Number);
     const titleFromParts =
       register && segment && number ? `${register} ${segment}-${number}` : null;
 
@@ -94,6 +113,65 @@ function extractDeedTypeAkteOptions(frames: TableFrame[] | undefined): DeedTypeA
   }
 
   return options;
+}
+
+function extractParcelEsriOptions(data: SupportLookup | undefined): string[] {
+  if (!data?.found) return [];
+  const values = new Set<string>();
+
+  const push = (value: string | null | undefined) => {
+    const trimmed = value?.trim();
+    if (trimmed) values.add(trimmed);
+  };
+
+  if ('meet_brief' in data) push(data.meet_brief);
+  if (data.summary && 'meet_brief' in data.summary) push(data.summary.meet_brief);
+
+  if (data.summary && 'linked_parcels' in data.summary) {
+    for (const parcel of data.summary.linked_parcels ?? []) {
+      push(parcel.meet_brief);
+    }
+  }
+
+  const parcelFrames =
+    data.frames?.filter((frame) =>
+      ['parcel', 'parcels', 'history_parcels'].includes(frame.key),
+    ) ?? [];
+
+  for (const frame of parcelFrames) {
+    for (const row of frame.rows) {
+      push(
+        asNullableString(row.esri) ??
+          asNullableString(row.MeetbriefInf) ??
+          asNullableString(row.Meetbriefinf) ??
+          asNullableString(row.PerceelESRI) ??
+          asNullableString(row.PerceelEsri) ??
+          asNullableString(row.meet_brief) ??
+          asNullableString(row.meetBrief),
+      );
+    }
+  }
+
+  return [...values].sort((a, b) => a.localeCompare(b));
+}
+
+function extractRegisterTitleOptions(data: SupportLookup | undefined): string[] {
+  if (!data?.found) return [];
+  const values = new Set<string>();
+
+  const push = (value: string | null | undefined) => {
+    const trimmed = value?.trim();
+    if (trimmed && !trimmed.startsWith('#')) values.add(trimmed);
+  };
+
+  if ('register_title' in data) push(data.register_title);
+  if (data.summary && 'register_title' in data.summary) push(data.summary.register_title);
+
+  for (const deed of extractDeedTypeAkteOptions(data.frames)) {
+    push(deed.title);
+  }
+
+  return [...values].sort((a, b) => a.localeCompare(b));
 }
 
 type LinkedParcelOrder = NonNullable<
@@ -530,12 +608,48 @@ export function SupportCenterPage() {
   const isDeedHistoryEntry = data?.entry === 'deed_history';
   const isParcelLikeEntry =
     data?.entry === 'parcel_number' || data?.entry === 'meet_brief';
+  const activeOrderIdForTools =
+    isOrderLikeEntry && data && 'order_id' in data && data.order_id > 0 ? data.order_id : null;
+  const showChangeTypeAkteTool =
+    (isParcelLikeEntry || isDeedHistoryEntry) && deedTypeAkteOptions.length > 0;
+  const showReopenBestellingTool = activeOrderIdForTools != null;
+  const showVoidOrderTool = activeOrderIdForTools != null;
+  const showChangeParcelTool = activeOrderIdForTools != null;
+  const showChangeDeedTool = activeOrderIdForTools != null;
+  const showRetireSubjectTool = Boolean(data?.found);
+  const dialect = selectedSystem?.dialect ?? data?.dialect;
   const showResolutionTools =
     Boolean(data?.found) &&
     Boolean(activeSystemKey) &&
-    isTerenoDialect(selectedSystem?.dialect ?? data?.dialect) &&
-    (isParcelLikeEntry || isDeedHistoryEntry) &&
-    deedTypeAkteOptions.length > 0;
+    ((isTerenoDialect(dialect) && (showChangeTypeAkteTool || showReopenBestellingTool)) ||
+      showVoidOrderTool ||
+      showChangeParcelTool ||
+      showChangeDeedTool ||
+      showRetireSubjectTool);
+
+  const retireInitialRegisterTitle = useMemo(() => {
+    if (!data?.found) return null;
+    if ('register_title' in data && data.register_title) return data.register_title;
+    if (data.summary && 'register_title' in data.summary && data.summary.register_title) {
+      return data.summary.register_title;
+    }
+    return null;
+  }, [data]);
+
+  const retireInitialParcelEsri = useMemo(() => {
+    if (!data?.found) return null;
+    if ('meet_brief' in data && data.meet_brief) return data.meet_brief;
+    if (data.summary && 'meet_brief' in data.summary && data.summary.meet_brief) {
+      return data.summary.meet_brief;
+    }
+    return null;
+  }, [data]);
+
+  const retireRegisterTitleOptions = useMemo(
+    () => extractRegisterTitleOptions(data),
+    [data],
+  );
+  const retireParcelEsriOptions = useMemo(() => extractParcelEsriOptions(data), [data]);
 
   const linkedParcelOrders = useMemo(() => getLinkedParcelOrders(data), [data]);
   const linkedOrderParcels = useMemo(() => getLinkedOrderParcels(data), [data]);
@@ -682,7 +796,19 @@ export function SupportCenterPage() {
           systemKey={selectedSystem.system_key}
           isProduction={isProduction}
           systemName={selectedSystem.name}
+          dialect={dialect}
           deeds={deedTypeAkteOptions}
+          orderId={activeOrderIdForTools}
+          initialRegisterTitle={retireInitialRegisterTitle}
+          initialParcelEsri={retireInitialParcelEsri}
+          registerTitleOptions={retireRegisterTitleOptions}
+          parcelEsriOptions={retireParcelEsriOptions}
+          showChangeTypeAkte={showChangeTypeAkteTool}
+          showReopenBestelling={showReopenBestellingTool}
+          showRetireSubject={showRetireSubjectTool}
+          showVoidOrder={showVoidOrderTool}
+          showChangeParcel={showChangeParcelTool}
+          showChangeDeed={showChangeDeedTool}
         />
       )}
 

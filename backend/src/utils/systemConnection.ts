@@ -1,4 +1,5 @@
 import sql from 'mssql';
+import { testTediousConnectionIsolated } from './tediousIsolate';
 
 const DEFAULT_CONNECTION_TIMEOUT_MS = 8000;
 const DEFAULT_REQUEST_TIMEOUT_MS = 10000;
@@ -17,6 +18,7 @@ export interface ParsedSqlServerUrl {
 }
 
 type MssqlDriver = typeof sql;
+export type MssqlDriverKind = 'tedious' | 'native';
 
 /**
  * Parses Prisma/SQL Server URL style:
@@ -57,18 +59,29 @@ export function parseSqlServerUrl(url: string): ParsedSqlServerUrl {
 }
 
 /**
- * Lazily load msnodesqlv8 only for Windows/local auth.
- * Importing it at module top-level pollutes `mssql` Request and breaks Azure/Tedious
- * with: "connection.queryRaw is not a function".
+ * msnodesqlv8 and Tedious share mssql's `base.driver`. Loading Tedious in the same
+ * process as Windows-auth (native) causes "connection.queryRaw is not a function".
+ * Only activate the native driver in-process; Tedious runs in a worker isolate.
  */
-function loadNativeDriver(): MssqlDriver {
+export function activateMssqlDriver(kind: MssqlDriverKind): MssqlDriver {
+  if (kind !== 'native') {
+    throw new Error(
+      'Tedious must not be activated in the main process; use tediousIsolate worker instead',
+    );
+  }
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   return require('mssql/msnodesqlv8') as MssqlDriver;
 }
 
+export function connectionNeedsTediousIsolate(url: string): boolean {
+  const parsed = parseSqlServerUrl(url);
+  return !(parsed.integrated && process.platform === 'win32');
+}
+
 export function buildMssqlConfig(url: string): {
-  driver: MssqlDriver;
-  config: sql.config;
+  driver: MssqlDriver | null;
+  driverKind: MssqlDriverKind;
+  config: sql.config | null;
   summary: string;
 } {
   const parsed = parseSqlServerUrl(url);
@@ -76,38 +89,25 @@ export function buildMssqlConfig(url: string): {
   const server = parsed.port ? `${parsed.server},${parsed.port}` : parsed.server;
   const trust = parsed.trustServerCertificate ? 'yes' : 'no';
   const encrypt = parsed.encrypt ? 'yes' : 'no';
-  const isAzure = parsed.server.toLowerCase().includes('.database.windows.net');
 
-  // Prefer Tedious for Azure SQL. Keep ODBC for local Windows auth / on-prem SQL auth on win32.
-  const useNative =
-    parsed.integrated ||
-    (process.platform === 'win32' && Boolean(parsed.user && parsed.password) && !isAzure);
+  // msnodesqlv8 only for Windows integrated auth. SQL auth (local + Azure) uses Tedious isolate.
+  const useNative = parsed.integrated && process.platform === 'win32';
 
   if (useNative) {
-    const sqlNative = loadNativeDriver();
-    const connectionString = parsed.integrated
-      ? [
-          'Driver={ODBC Driver 18 for SQL Server}',
-          `Server=${server}`,
-          `Database=${parsed.database ?? ''}`,
-          'Trusted_Connection=yes',
-          `TrustServerCertificate=${trust}`,
-          `Encrypt=${encrypt}`,
-          `Connection Timeout=${Math.ceil(DEFAULT_CONNECTION_TIMEOUT_MS / 1000)}`,
-        ].join(';')
-      : [
-          'Driver={ODBC Driver 18 for SQL Server}',
-          `Server=${server}`,
-          `Database=${parsed.database ?? ''}`,
-          `UID=${parsed.user}`,
-          `PWD=${parsed.password}`,
-          `TrustServerCertificate=${trust}`,
-          `Encrypt=${encrypt}`,
-          `Connection Timeout=${Math.ceil(DEFAULT_CONNECTION_TIMEOUT_MS / 1000)}`,
-        ].join(';');
+    const sqlNative = activateMssqlDriver('native');
+    const connectionString = [
+      'Driver={ODBC Driver 18 for SQL Server}',
+      `Server=${server}`,
+      `Database=${parsed.database ?? ''}`,
+      'Trusted_Connection=yes',
+      `TrustServerCertificate=${trust}`,
+      `Encrypt=${encrypt}`,
+      `Connection Timeout=${Math.ceil(DEFAULT_CONNECTION_TIMEOUT_MS / 1000)}`,
+    ].join(';');
 
     return {
       driver: sqlNative,
+      driverKind: 'native',
       summary,
       config: {
         server: parsed.server,
@@ -118,27 +118,11 @@ export function buildMssqlConfig(url: string): {
     };
   }
 
-  // Azure SQL: encrypt required; validate Azure cert (trustServerCertificate=false).
   return {
-    driver: sql,
+    driver: null,
+    driverKind: 'tedious',
     summary,
-    config: {
-      server: parsed.server,
-      database: parsed.database,
-      user: parsed.user,
-      password: parsed.password,
-      options: {
-        encrypt: true,
-        trustServerCertificate: false,
-        connectTimeout: DEFAULT_CONNECTION_TIMEOUT_MS,
-        enableArithAbort: true,
-        ...(isAzure ? {} : { port: parsed.port }),
-      },
-      ...(isAzure ? {} : { port: parsed.port }),
-      connectionTimeout: DEFAULT_CONNECTION_TIMEOUT_MS,
-      requestTimeout: DEFAULT_REQUEST_TIMEOUT_MS,
-      pool: { max: 1, min: 0, idleTimeoutMillis: 1000 },
-    },
+    config: null,
   };
 }
 
@@ -202,10 +186,27 @@ async function closePoolQuietly(pool: sql.ConnectionPool | null): Promise<void> 
 }
 
 export async function testSqlServerConnection(url: string): Promise<{ ok: boolean; error?: string }> {
-  let pool: sql.ConnectionPool | null = null;
-  const { driver, config, summary } = buildMssqlConfig(url);
+  const { driver, config, summary, driverKind } = buildMssqlConfig(url);
 
+  // SQL auth / Azure: Tedious in a worker so it never corrupts msnodesqlv8 in this process.
+  if (driverKind === 'tedious') {
+    const isolated = await withTimeout(
+      testTediousConnectionIsolated(url),
+      HARD_CONNECT_TIMEOUT_MS + DEFAULT_REQUEST_TIMEOUT_MS,
+      `Connect ${summary}`,
+    ).catch((error: unknown) => ({
+      ok: false as const,
+      error: formatConnectionError(error),
+    }));
+    if (isolated.ok) return { ok: true };
+    return { ok: false, error: `${summary}: ${isolated.error ?? 'Connection failed'}` };
+  }
+
+  let pool: sql.ConnectionPool | null = null;
   try {
+    if (!driver || !config) {
+      return { ok: false, error: `${summary}: Native driver config missing` };
+    }
     pool = new driver.ConnectionPool(config);
     await withTimeout(pool.connect(), HARD_CONNECT_TIMEOUT_MS, `Connect ${summary}`);
     await withTimeout(

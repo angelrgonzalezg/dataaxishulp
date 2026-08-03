@@ -340,6 +340,246 @@ export interface UpdateDeedLegalFactResult {
   next: LegalFactOption;
 }
 
+export interface ReopenBestellingChange {
+  action_type: string | null;
+  order_id: number | null;
+  order_product_id: number | null;
+  product_id: string | null;
+  product_number: number | null;
+  product_code: string | null;
+  product_name: string | null;
+  from_status_id: number | null;
+  from_status: string | null;
+  to_status_id: number | null;
+  to_status: string | null;
+  detail: string | null;
+  raw: Record<string, unknown>;
+}
+
+export interface ReopenBestellingResult {
+  system_key: string;
+  system_name: string;
+  dialect: string;
+  is_production: boolean;
+  order_id: number;
+  preview_only: boolean;
+  return_value: number | null;
+  change_count: number;
+  changes: ReopenBestellingChange[];
+  rows: Record<string, unknown>[];
+}
+
+export interface VoidOrderProductChange {
+  order_product_id: number;
+  product_code: string | null;
+  product_name: string | null;
+  from_status_id: number | null;
+  from_status: string | null;
+  to_status_id: number;
+  to_status: string | null;
+  raw: Record<string, unknown>;
+}
+
+export interface VoidOrderRegistryRisk {
+  table: string;
+  count: number;
+  detail: string;
+}
+
+export interface VoidOrderResult {
+  system_key: string;
+  system_name: string;
+  dialect: string;
+  is_production: boolean;
+  order_id: number;
+  preview_only: boolean;
+  void_status_id: number;
+  order_from_status_id: number | null;
+  order_from_status: string | null;
+  order_to_status_id: number;
+  order_to_status: string | null;
+  product_change_count: number;
+  product_changes: VoidOrderProductChange[];
+  is_safe: boolean;
+  risks: VoidOrderRegistryRisk[];
+  warnings: string[];
+  already_voided: boolean;
+}
+
+export interface OrderParcelLink {
+  link_id: number;
+  order_product_id: number;
+  parcel_id: number | null;
+  parcel_esri: string | null;
+  parcel_location: string | null;
+  parcel_status: string | null;
+  raw: Record<string, unknown>;
+}
+
+export interface OrderParcelLinksResult {
+  system_key: string;
+  system_name: string;
+  dialect: string;
+  is_production: boolean;
+  order_id: number;
+  links: OrderParcelLink[];
+}
+
+export interface ParcelEsriCandidate {
+  parcel_id: number;
+  parcel_esri: string | null;
+  location: string | null;
+  status: string | null;
+}
+
+export interface ParcelEsriSearchResult {
+  parcel_id: number;
+  parcel_esri: string | null;
+  candidates: ParcelEsriCandidate[];
+}
+
+export interface ChangeOrderParcelResult {
+  system_key: string;
+  system_name: string;
+  dialect: string;
+  is_production: boolean;
+  order_id: number;
+  preview_only: boolean;
+  link_id: number;
+  order_product_id: number;
+  from_parcel_id: number | null;
+  from_parcel_esri: string | null;
+  to_parcel_id: number;
+  to_parcel_esri: string | null;
+  raw: Record<string, unknown>;
+}
+
+export interface OrderDeedLink {
+  link_id: number;
+  order_product_id: number;
+  deed_id: number | null;
+  register_title: string | null;
+  akte: string | null;
+  raw: Record<string, unknown>;
+}
+
+export interface OrderDeedLinksResult {
+  system_key: string;
+  system_name: string;
+  dialect: string;
+  is_production: boolean;
+  order_id: number;
+  links: OrderDeedLink[];
+}
+
+export interface DeedTitleCandidate {
+  deed_id: number;
+  register_title: string;
+}
+
+export interface DeedTitleSearchResult {
+  register_title: string;
+  candidates: DeedTitleCandidate[];
+}
+
+export interface ChangeOrderDeedResult {
+  system_key: string;
+  system_name: string;
+  dialect: string;
+  is_production: boolean;
+  order_id: number;
+  preview_only: boolean;
+  link_id: number;
+  order_product_id: number;
+  from_deed_id: number | null;
+  from_register_title: string | null;
+  from_akte: string | null;
+  to_deed_id: number;
+  to_register_title: string;
+  to_akte: string;
+  raw: Record<string, unknown>;
+}
+
+export interface RetireSubjectCandidate {
+  deed_detail_id: number;
+  deed_id: number;
+  register_title: string;
+  parcel_id: number;
+  parcel_esri: string | null;
+  subject_id: number;
+  subject_name: string;
+  share_numerator: number | null;
+  share_denominator: number | null;
+  is_retired: boolean;
+  legal_fact_type_id: number | null;
+}
+
+export interface OwnershipShareValidation {
+  is_valid: boolean;
+  active_count: number;
+  total_numerator: number | null;
+  total_denominator: number | null;
+  total_display: string | null;
+  total_decimal: number | null;
+  expected_display: '1/1';
+  incomplete_share_count: number;
+  message: string;
+}
+
+export interface RetireSubjectLookupResult {
+  system_key: string;
+  system_name: string;
+  dialect: string;
+  is_production: boolean;
+  register_title: string;
+  parcel_esri: string;
+  deed_ids: number[];
+  parcel_ids: number[];
+  candidates: RetireSubjectCandidate[];
+  share_validation: OwnershipShareValidation;
+}
+
+export interface RetireSubjectChange {
+  deed_detail_id: number;
+  deed_id: number;
+  register_title: string | null;
+  parcel_id: number | null;
+  parcel_esri: string | null;
+  subject_id: number;
+  subject_name: string;
+  from_is_retired: boolean;
+  to_is_retired: true;
+  raw: Record<string, unknown>;
+}
+
+export interface RetireSubjectResult {
+  system_key: string;
+  system_name: string;
+  dialect: string;
+  is_production: boolean;
+  preview_only: boolean;
+  change_count: number;
+  changes: RetireSubjectChange[];
+  share_validation: OwnershipShareValidation;
+  remaining_active: RetireSubjectCandidate[];
+}
+
+export interface CorrectOwnershipShareResult {
+  system_key: string;
+  system_name: string;
+  dialect: string;
+  is_production: boolean;
+  preview_only: boolean;
+  deed_detail_id: number;
+  subject_id: number;
+  subject_name: string;
+  from_share_numerator: number | null;
+  from_share_denominator: number | null;
+  to_share_numerator: number;
+  to_share_denominator: number;
+  share_validation: OwnershipShareValidation;
+}
+
 export interface DeedTypeAkteOption {
   deedId: number;
   title: string;

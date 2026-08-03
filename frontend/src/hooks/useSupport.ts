@@ -8,8 +8,20 @@ import {
   fetchOrderSupportByRegisterTitle,
   fetchParcelSupportById,
   fetchParcelSupportByMeetBrief,
+  lookupRetireSubjectCandidates,
+  reopenBestelling,
+  voidOrder,
+  fetchOrderParcelLinks,
+  searchParcelByEsri,
+  changeOrderParcel,
+  fetchOrderDeedLinks,
+  searchDeedByTitle,
+  changeOrderDeed,
+  retireSubjectFromDeed,
+  correctOwnershipShare,
   updateDeedLegalFact,
 } from '@/api/support.api';
+import type { RetireSubjectCandidate } from '@/types';
 
 export function useOrderSupport(orderId: number | null, systemKey: string | null) {
   return useQuery({
@@ -110,6 +122,234 @@ export function useUpdateDeedLegalFact() {
       void queryClient.invalidateQueries({
         queryKey: ['support', 'deedLegalFact', variables.systemKey, variables.deedId],
       });
+    },
+  });
+}
+
+export function useReopenBestelling() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      orderId,
+      systemKey,
+      previewOnly,
+      confirm,
+    }: {
+      orderId: number;
+      systemKey: string;
+      previewOnly: boolean;
+      confirm?: true;
+    }) =>
+      reopenBestelling(orderId, {
+        systemKey,
+        previewOnly,
+        confirm,
+      }),
+    onSuccess: (data, variables) => {
+      if (!variables.previewOnly) {
+        void queryClient.invalidateQueries({ queryKey: ['support'] });
+        void queryClient.invalidateQueries({
+          queryKey: ['support', 'order', variables.systemKey, data.order_id],
+        });
+      }
+    },
+  });
+}
+
+export function useVoidOrder() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      orderId,
+      systemKey,
+      previewOnly,
+      confirm,
+      acknowledgeRisk,
+    }: {
+      orderId: number;
+      systemKey: string;
+      previewOnly: boolean;
+      confirm?: true;
+      acknowledgeRisk?: boolean;
+    }) =>
+      voidOrder(orderId, {
+        systemKey,
+        previewOnly,
+        confirm,
+        acknowledgeRisk,
+      }),
+    onSuccess: (data, variables) => {
+      if (!variables.previewOnly) {
+        void queryClient.invalidateQueries({ queryKey: ['support'] });
+        void queryClient.invalidateQueries({
+          queryKey: ['support', 'order', variables.systemKey, data.order_id],
+        });
+      }
+    },
+  });
+}
+
+export function useOrderParcelLinks(orderId: number | null, systemKey: string | null) {
+  return useQuery({
+    queryKey: ['support', 'orderParcelLinks', systemKey, orderId],
+    queryFn: () => fetchOrderParcelLinks(orderId!, systemKey!),
+    enabled: orderId != null && orderId > 0 && Boolean(systemKey),
+    retry: false,
+  });
+}
+
+export function useSearchParcelByEsri() {
+  return useMutation({
+    mutationFn: ({ systemKey, esri }: { systemKey: string; esri: string }) =>
+      searchParcelByEsri(systemKey, esri),
+  });
+}
+
+export function useChangeOrderParcel() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      orderId,
+      systemKey,
+      linkId,
+      newParcelEsri,
+      newParcelId,
+      previewOnly,
+      confirm,
+    }: {
+      orderId: number;
+      systemKey: string;
+      linkId: number;
+      newParcelEsri?: string;
+      newParcelId?: number;
+      previewOnly: boolean;
+      confirm?: true;
+    }) =>
+      changeOrderParcel(orderId, {
+        systemKey,
+        linkId,
+        newParcelEsri,
+        newParcelId,
+        previewOnly,
+        confirm,
+      }),
+    onSuccess: (data, variables) => {
+      if (!variables.previewOnly) {
+        void queryClient.invalidateQueries({ queryKey: ['support'] });
+        void queryClient.invalidateQueries({
+          queryKey: ['support', 'orderParcelLinks', variables.systemKey, data.order_id],
+        });
+      }
+    },
+  });
+}
+
+export function useOrderDeedLinks(orderId: number | null, systemKey: string | null) {
+  return useQuery({
+    queryKey: ['support', 'orderDeedLinks', systemKey, orderId],
+    queryFn: () => fetchOrderDeedLinks(orderId!, systemKey!),
+    enabled: orderId != null && orderId > 0 && Boolean(systemKey),
+    retry: false,
+  });
+}
+
+export function useSearchDeedByTitle() {
+  return useMutation({
+    mutationFn: ({ systemKey, title }: { systemKey: string; title: string }) =>
+      searchDeedByTitle(systemKey, title),
+  });
+}
+
+export function useChangeOrderDeed() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      orderId,
+      systemKey,
+      linkId,
+      newRegisterTitle,
+      newDeedId,
+      previewOnly,
+      confirm,
+    }: {
+      orderId: number;
+      systemKey: string;
+      linkId: number;
+      newRegisterTitle?: string;
+      newDeedId?: number;
+      previewOnly: boolean;
+      confirm?: true;
+    }) =>
+      changeOrderDeed(orderId, {
+        systemKey,
+        linkId,
+        newRegisterTitle,
+        newDeedId,
+        previewOnly,
+        confirm,
+      }),
+    onSuccess: (data, variables) => {
+      if (!variables.previewOnly) {
+        void queryClient.invalidateQueries({ queryKey: ['support'] });
+        void queryClient.invalidateQueries({
+          queryKey: ['support', 'orderDeedLinks', variables.systemKey, data.order_id],
+        });
+      }
+    },
+  });
+}
+
+export function useLookupRetireSubjectCandidates() {
+  return useMutation({
+    mutationFn: (params: {
+      systemKey: string;
+      registerTitle: string;
+      parcelEsri: string;
+    }) => lookupRetireSubjectCandidates(params),
+  });
+}
+
+export function useRetireSubjectFromDeed() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (payload: {
+      systemKey: string;
+      deedDetailIds: number[];
+      previewOnly: boolean;
+      confirm?: true;
+    }) => retireSubjectFromDeed(payload),
+    onSuccess: (_data, variables) => {
+      if (!variables.previewOnly) {
+        void queryClient.invalidateQueries({ queryKey: ['support'] });
+      }
+    },
+  });
+}
+
+export function useCorrectOwnershipShare() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (payload: {
+      deedDetailId: number;
+      systemKey: string;
+      shareNumerator: number;
+      shareDenominator: number;
+      previewOnly: boolean;
+      confirm?: true;
+      contextCandidates?: RetireSubjectCandidate[];
+    }) =>
+      correctOwnershipShare(payload.deedDetailId, {
+        systemKey: payload.systemKey,
+        shareNumerator: payload.shareNumerator,
+        shareDenominator: payload.shareDenominator,
+        previewOnly: payload.previewOnly,
+        confirm: payload.confirm,
+        contextCandidates: payload.contextCandidates,
+      }),
+    onSuccess: (_data, variables) => {
+      if (!variables.previewOnly) {
+        void queryClient.invalidateQueries({ queryKey: ['support'] });
+      }
     },
   });
 }
