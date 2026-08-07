@@ -571,6 +571,38 @@ export async function lookupParcel(input: {
     buildFrame('orders', 'Orders (Agenda)', 'Agenda', 'Agenda_ID', orders, ANDERE.orders),
   );
 
+  const productCountByOrder = new Map<number, number>();
+  for (const row of orderProducts) {
+    const oid = getFieldNumber(row, 'AgendaO_IDGroup');
+    if (oid == null) continue;
+    productCountByOrder.set(oid, (productCountByOrder.get(oid) ?? 0) + 1);
+  }
+
+  const orderById = new Map<number, Record<string, unknown>>();
+  for (const order of orders) {
+    const id = getFieldNumber(order, 'Agenda_ID');
+    if (id != null) orderById.set(id, order);
+  }
+
+  const linkedOrders = orderIds
+    .map((orderId) => {
+      const order = orderById.get(orderId);
+      return {
+        order_id: orderId,
+        transaction_id: null as string | null,
+        notary_code: order ? getFieldString(order, 'Agenda_NotaryCode') : null,
+        requester: order ? getFieldString(order, 'Agenda_Requester') : null,
+        register_date: order
+          ? order.Agenda_RegisterDate instanceof Date
+            ? order.Agenda_RegisterDate.toISOString()
+            : getFieldString(order, 'Agenda_RegisterDate')
+          : null,
+        product_count: productCountByOrder.get(orderId) ?? 0,
+      };
+    })
+    .filter((item) => item.order_id > 0)
+    .sort((a, b) => b.order_id - a.order_id);
+
   return {
     system_key: system.system_key,
     system_name: system.system_name,
@@ -595,6 +627,7 @@ export async function lookupParcel(input: {
       limited_rights_details: limitedDetails.length,
       share_details: shareDetails.length,
       order_links: orderParcels.length,
+      linked_orders: linkedOrders,
     },
     frames,
   };

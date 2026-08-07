@@ -20,8 +20,12 @@ import {
   retireSubjectFromDeed,
   correctOwnershipShare,
   updateDeedLegalFact,
+  searchNotaries,
+  fetchDeedNotary,
+  changeDeedNotary,
+  updateFrameRows,
 } from '@/api/support.api';
-import type { RetireSubjectCandidate } from '@/types';
+import type { FrameRowChange, RetireSubjectCandidate } from '@/types';
 
 export function useOrderSupport(orderId: number | null, systemKey: string | null) {
   return useQuery({
@@ -122,6 +126,78 @@ export function useUpdateDeedLegalFact() {
       void queryClient.invalidateQueries({
         queryKey: ['support', 'deedLegalFact', variables.systemKey, variables.deedId],
       });
+    },
+  });
+}
+
+export function useDeedNotary(
+  deedId: number | null,
+  systemKey: string | null,
+  enabled = true,
+) {
+  return useQuery({
+    queryKey: ['support', 'deedNotary', systemKey, deedId],
+    queryFn: () => fetchDeedNotary(deedId!, systemKey!),
+    enabled: deedId != null && deedId > 0 && Boolean(systemKey) && enabled,
+    retry: false,
+  });
+}
+
+export function useSearchNotaries() {
+  return useMutation({
+    mutationFn: ({ systemKey, q }: { systemKey: string; q: string }) =>
+      searchNotaries(systemKey, q),
+  });
+}
+
+export function useChangeDeedNotary() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      deedId,
+      systemKey,
+      notaryId,
+      previewOnly,
+      confirm,
+    }: {
+      deedId: number;
+      systemKey: string;
+      notaryId: number;
+      previewOnly: boolean;
+      confirm?: true;
+    }) =>
+      changeDeedNotary(deedId, {
+        systemKey,
+        notaryId,
+        previewOnly,
+        confirm,
+      }),
+    onSuccess: (_data, variables) => {
+      if (!variables.previewOnly) {
+        void queryClient.invalidateQueries({ queryKey: ['support'] });
+        void queryClient.invalidateQueries({
+          queryKey: ['support', 'deedNotary', variables.systemKey, variables.deedId],
+        });
+      }
+    },
+  });
+}
+
+export function useUpdateFrameRows() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (payload: {
+      systemKey: string;
+      tableName: string;
+      primaryKey: string;
+      changes: FrameRowChange[];
+      previewOnly: boolean;
+      confirm?: true;
+    }) => updateFrameRows(payload),
+    onSuccess: (_data, variables) => {
+      if (!variables.previewOnly) {
+        void queryClient.invalidateQueries({ queryKey: ['support'] });
+      }
     },
   });
 }

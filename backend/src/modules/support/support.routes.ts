@@ -17,6 +17,12 @@ import {
   listLegalFacts,
   updateDeedLegalFact,
 } from './support.deed.mutate.service';
+import {
+  changeDeedNotary,
+  getDeedNotary,
+  searchNotaries,
+} from './support.deed.notary.service';
+import { updateFrameRows } from './support.frame.edit.service';
 import { reopenBestelling } from './support.order.reopen.service';
 import { voidOrder } from './support.order.void.service';
 import {
@@ -73,6 +79,42 @@ const updateDeedLegalFactSchema = z.object({
   systemKey: z.string().min(1),
   legalFactId: z.coerce.number().int().positive(),
   confirm: z.literal(true),
+});
+
+const notarySearchSchema = z.object({
+  systemKey: z.string().min(1).optional(),
+  q: z.string().min(1),
+});
+
+const changeDeedNotarySchema = z.object({
+  systemKey: z.string().min(1),
+  notaryId: z.coerce.number().int().positive(),
+  previewOnly: z.boolean(),
+  confirm: z.literal(true).optional(),
+});
+
+const updateFrameRowsSchema = z.object({
+  systemKey: z.string().min(1),
+  tableName: z.string().min(1),
+  primaryKey: z.string().min(1),
+  previewOnly: z.boolean(),
+  confirm: z.literal(true).optional(),
+  changes: z
+    .array(
+      z.object({
+        primary_key_value: z.union([z.string(), z.number()]),
+        cells: z
+          .array(
+            z.object({
+              column: z.string().min(1),
+              from: z.unknown().nullable(),
+              to: z.unknown().nullable(),
+            }),
+          )
+          .min(1),
+      }),
+    )
+    .min(1),
 });
 
 const reopenBestellingSchema = z.object({
@@ -389,6 +431,112 @@ router.post(
         updatedBy: req.user?.username ?? 'dataaxis-hulp',
       });
       res.json(successResponse(data));
+    } catch (error) {
+      next(error);
+    }
+  },
+);
+
+router.get(
+  '/notaries/search',
+  requirePermission('support.view'),
+  validate(notarySearchSchema, 'query'),
+  async (req, res, next) => {
+    try {
+      const systemKey =
+        (req.query.systemKey as string | undefined)?.trim() || DEFAULT_SYSTEM_KEY;
+      const q = String(req.query.q ?? '');
+      const data = await searchNotaries(q, systemKey);
+      res.json(successResponse(data));
+    } catch (error) {
+      next(error);
+    }
+  },
+);
+
+router.get(
+  '/deeds/:deedId/notary',
+  requirePermission('support.view'),
+  validate(deedParamsSchema, 'params'),
+  validate(systemKeySchema, 'query'),
+  async (req, res, next) => {
+    try {
+      const systemKey =
+        (req.query.systemKey as string | undefined)?.trim() || DEFAULT_SYSTEM_KEY;
+      const data = await getDeedNotary(Number(req.params.deedId), systemKey);
+      res.json(successResponse(data));
+    } catch (error) {
+      next(error);
+    }
+  },
+);
+
+router.post(
+  '/deeds/:deedId/notary',
+  requirePermission('support.edit'),
+  validate(deedParamsSchema, 'params'),
+  validate(changeDeedNotarySchema, 'body'),
+  async (req, res, next) => {
+    try {
+      const body = req.body as z.infer<typeof changeDeedNotarySchema>;
+      if (!body.previewOnly && body.confirm !== true) {
+        throw new ValidationError(
+          'Confirmation required. Set confirm=true to apply Change Notaris.',
+        );
+      }
+      const data = await changeDeedNotary({
+        deedId: Number(req.params.deedId),
+        systemKey: body.systemKey,
+        notaryId: body.notaryId,
+        previewOnly: body.previewOnly,
+        confirm: body.confirm,
+        updatedBy: req.user?.username ?? 'dataaxis-hulp',
+      });
+      res.json(
+        successResponse(
+          data,
+          body.previewOnly ? 'Change Notaris preview' : 'Deed notary updated',
+        ),
+      );
+    } catch (error) {
+      next(error);
+    }
+  },
+);
+
+router.post(
+  '/frames/update-rows',
+  requirePermission('support.edit'),
+  validate(updateFrameRowsSchema, 'body'),
+  async (req, res, next) => {
+    try {
+      const body = req.body as z.infer<typeof updateFrameRowsSchema>;
+      if (!body.previewOnly && body.confirm !== true) {
+        throw new ValidationError(
+          'Confirmation required. Set confirm=true to apply frame column updates.',
+        );
+      }
+      const data = await updateFrameRows({
+        systemKey: body.systemKey,
+        tableName: body.tableName,
+        primaryKey: body.primaryKey,
+        changes: body.changes.map((row) => ({
+          primary_key_value: row.primary_key_value,
+          cells: row.cells.map((cell) => ({
+            column: cell.column,
+            from: cell.from ?? null,
+            to: cell.to ?? null,
+          })),
+        })),
+        previewOnly: body.previewOnly,
+        confirm: body.confirm,
+      });
+      res.json(
+        successResponse(
+          data,
+          body.previewOnly ? 'Frame column update preview' : 'Frame columns updated',
+        ),
+      );
     } catch (error) {
       next(error);
     }

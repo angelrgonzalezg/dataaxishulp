@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { ClipboardList, FileText, LifeBuoy, Search, ArrowLeft } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
@@ -195,7 +195,10 @@ function getLinkedParcelOrders(data: SupportLookup | undefined): LinkedParcelOrd
   const productsFrame = data.frames.find((frame) => frame.key === 'order_products');
   const productCountByOrder = new Map<number, number>();
   for (const row of productsFrame?.rows ?? []) {
-    const orderId = asNullableNumber(row.orderId);
+    const orderId =
+      asNullableNumber(row.orderId) ??
+      asNullableNumber(row.AgendaO_IDGroup) ??
+      asNullableNumber(row.agendaO_IDGroup);
     if (orderId == null) continue;
     productCountByOrder.set(orderId, (productCountByOrder.get(orderId) ?? 0) + 1);
   }
@@ -204,20 +207,36 @@ function getLinkedParcelOrders(data: SupportLookup | undefined): LinkedParcelOrd
   if (ordersFrame?.rows.length) {
     return ordersFrame.rows
       .map((row) => {
-        const orderId = asNullableNumber(row.id) ?? asNullableNumber(row.Id) ?? 0;
+        const orderId =
+          asNullableNumber(row.id) ??
+          asNullableNumber(row.Id) ??
+          asNullableNumber(row.Agenda_ID) ??
+          asNullableNumber(row.agenda_ID) ??
+          0;
         return {
           order_id: orderId,
-          transaction_id: asNullableString(row.transactionId),
-          notary_code: asNullableString(row.notaryCode),
-          requester: asNullableString(row.requester),
-          register_date: asNullableString(row.registerDate),
+          transaction_id:
+            asNullableString(row.transactionId) ?? asNullableString(row.TransactionId),
+          notary_code:
+            asNullableString(row.notaryCode) ??
+            asNullableString(row.Agenda_NotaryCode) ??
+            asNullableString(row.agenda_NotaryCode),
+          requester:
+            asNullableString(row.requester) ??
+            asNullableString(row.Agenda_Requester) ??
+            asNullableString(row.agenda_Requester),
+          register_date:
+            asNullableString(row.registerDate) ??
+            asNullableString(row.Agenda_RegisterDate) ??
+            asNullableString(row.agenda_RegisterDate),
           product_count: productCountByOrder.get(orderId) ?? 0,
         };
       })
-      .filter((item) => item.order_id > 0);
+      .filter((item) => item.order_id > 0)
+      .sort((a, b) => b.order_id - a.order_id);
   }
 
-  // Last resort: distinct orderId from OrderProduct rows.
+  // Last resort: distinct orderId from OrderProduct / Agenda_Opdracht rows.
   return [...productCountByOrder.entries()]
     .map(([orderId, productCount]) => ({
       order_id: orderId,
@@ -289,6 +308,7 @@ function groupFrames(frames: TableFrame[]) {
 export function SupportCenterPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { data: systems } = useSystems();
   const activeSystems = useMemo(
     () => (systems ?? []).filter((system) => system.is_active && system.has_connection_url),
@@ -296,9 +316,25 @@ export function SupportCenterPage() {
   );
 
   const [systemKey, setSystemKey] = useState(
-    () => localStorage.getItem(SYSTEM_STORAGE_KEY) ?? 'kadaster_statia',
+    () =>
+      searchParams.get('systemKey') ??
+      localStorage.getItem(SYSTEM_STORAGE_KEY) ??
+      'kadaster_statia',
   );
-  const [entryMode, setEntryMode] = useState<EntryMode>('order');
+  const [entryMode, setEntryMode] = useState<EntryMode>(() => {
+    const entry = searchParams.get('entry');
+    if (
+      entry === 'order' ||
+      entry === 'kenmerk' ||
+      entry === 'register_deed' ||
+      entry === 'deed_history' ||
+      entry === 'parcel_number' ||
+      entry === 'meet_brief'
+    ) {
+      return entry;
+    }
+    return 'order';
+  });
   const [orderInput, setOrderInput] = useState('5303');
   const [kenmerkInput, setKenmerkInput] = useState('107/2026');
   const [registerInput, setRegisterInput] = useState('B 156-3');
@@ -328,6 +364,7 @@ export function SupportCenterPage() {
     kenmerk: string | null;
     registerTitle: string | null;
   } | null>(null);
+  const [restoredFromUrl, setRestoredFromUrl] = useState(false);
 
   const selectedSystem = activeSystems.find((system) => system.system_key === systemKey)
     ?? activeSystems[0]
@@ -408,6 +445,54 @@ export function SupportCenterPage() {
     setActiveParcelId(null);
     setActiveMeetBrief(null);
   }
+
+  useEffect(() => {
+    if (restoredFromUrl) return;
+    const entry = searchParams.get('entry') as EntryMode | null;
+    const q = searchParams.get('q')?.trim() ?? '';
+    const sk = searchParams.get('systemKey')?.trim();
+    const autoload = searchParams.get('autoload') === '1';
+    if (!autoload || !entry || !q) {
+      setRestoredFromUrl(true);
+      return;
+    }
+
+    if (sk) setSystemKey(sk);
+    setEntryMode(entry);
+    setParcelReturn(null);
+    setOrderReturn(null);
+    setActiveOrderId(null);
+    setActiveKenmerk(null);
+    setActiveRegisterTitle(null);
+    setActiveDeedHistoryTitle(null);
+    setActiveParcelId(null);
+    setActiveMeetBrief(null);
+
+    if (entry === 'order') {
+      const orderId = Number(q);
+      setOrderInput(q);
+      if (Number.isFinite(orderId) && orderId > 0) setActiveOrderId(orderId);
+    } else if (entry === 'kenmerk') {
+      setKenmerkInput(q);
+      setActiveKenmerk(q);
+    } else if (entry === 'register_deed') {
+      setRegisterInput(q);
+      setActiveRegisterTitle(q);
+    } else if (entry === 'deed_history') {
+      setDeedHistoryInput(q);
+      setActiveDeedHistoryTitle(q);
+    } else if (entry === 'parcel_number') {
+      const parcelId = Number(q);
+      setParcelInput(q);
+      if (Number.isFinite(parcelId) && parcelId > 0) setActiveParcelId(parcelId);
+    } else if (entry === 'meet_brief') {
+      setMeetBriefInput(q);
+      setActiveMeetBrief(q);
+    }
+
+    setRestoredFromUrl(true);
+    setSearchParams({}, { replace: true });
+  }, [restoredFromUrl, searchParams, setSearchParams]);
 
   function onSystemChange(nextKey: string) {
     setSystemKey(nextKey);
@@ -612,6 +697,8 @@ export function SupportCenterPage() {
     isOrderLikeEntry && data && 'order_id' in data && data.order_id > 0 ? data.order_id : null;
   const showChangeTypeAkteTool =
     (isParcelLikeEntry || isDeedHistoryEntry) && deedTypeAkteOptions.length > 0;
+  const showChangeNotarisTool =
+    (isParcelLikeEntry || isDeedHistoryEntry) && deedTypeAkteOptions.length > 0;
   const showReopenBestellingTool = activeOrderIdForTools != null;
   const showVoidOrderTool = activeOrderIdForTools != null;
   const showChangeParcelTool = activeOrderIdForTools != null;
@@ -622,6 +709,7 @@ export function SupportCenterPage() {
     Boolean(data?.found) &&
     Boolean(activeSystemKey) &&
     ((isTerenoDialect(dialect) && (showChangeTypeAkteTool || showReopenBestellingTool)) ||
+      showChangeNotarisTool ||
       showVoidOrderTool ||
       showChangeParcelTool ||
       showChangeDeedTool ||
@@ -653,10 +741,7 @@ export function SupportCenterPage() {
 
   const linkedParcelOrders = useMemo(() => getLinkedParcelOrders(data), [data]);
   const linkedOrderParcels = useMemo(() => getLinkedOrderParcels(data), [data]);
-  const showParcelOrdersPanel =
-    Boolean(data?.found) &&
-    isParcelLikeEntry &&
-    isTerenoDialect(selectedSystem?.dialect ?? data?.dialect);
+  const showParcelOrdersPanel = Boolean(data?.found) && isParcelLikeEntry;
   const showOrderParcelsPanel = Boolean(data?.found) && isOrderLikeEntry;
   const [selectedLinkedOrderId, setSelectedLinkedOrderId] = useState<number | ''>('');
   const [selectedLinkedParcelId, setSelectedLinkedParcelId] = useState<number | ''>('');
@@ -804,6 +889,7 @@ export function SupportCenterPage() {
           registerTitleOptions={retireRegisterTitleOptions}
           parcelEsriOptions={retireParcelEsriOptions}
           showChangeTypeAkte={showChangeTypeAkteTool}
+          showChangeNotaris={showChangeNotarisTool}
           showReopenBestelling={showReopenBestellingTool}
           showRetireSubject={showRetireSubjectTool}
           showVoidOrder={showVoidOrderTool}
@@ -965,13 +1051,20 @@ export function SupportCenterPage() {
             </div>
           </div>
           <Button
-            onClick={() =>
-              navigate(
-                `/support/inzage?parcelId=${data.parcel_id}&systemKey=${encodeURIComponent(
-                  activeSystemKey ?? '',
-                )}&variant=object`,
-              )
-            }
+            onClick={() => {
+              const returnValue =
+                entryMode === 'meet_brief'
+                  ? (data.meet_brief ?? meetBriefInput).trim() || String(data.parcel_id)
+                  : String(data.parcel_id);
+              const params = new URLSearchParams({
+                parcelId: String(data.parcel_id),
+                systemKey: activeSystemKey ?? '',
+                variant: 'object',
+                returnEntry: entryMode,
+                returnValue,
+              });
+              navigate(`/support/inzage?${params.toString()}`);
+            }}
           >
             <FileText style={{ width: 18, height: 18 }} />
             {t('inzage.generate')}
@@ -1180,7 +1273,13 @@ export function SupportCenterPage() {
                 </span>
               </div>
               {group.frames.map((frame) => (
-                <TableFrameCard key={frame.key} frame={frame} />
+                <TableFrameCard
+                  key={frame.key}
+                  frame={frame}
+                  systemKey={selectedSystem?.system_key ?? data.system_key}
+                  isProduction={isProduction}
+                  systemName={selectedSystem?.name ?? data.system_name}
+                />
               ))}
             </div>
           ))}

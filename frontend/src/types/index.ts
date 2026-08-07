@@ -340,6 +340,71 @@ export interface UpdateDeedLegalFactResult {
   next: LegalFactOption;
 }
 
+export interface NotaryOption {
+  id: number;
+  code: string | null;
+  name: string | null;
+  active: boolean | null;
+}
+
+export interface DeedNotaryState {
+  system_key: string;
+  system_name: string;
+  dialect: string;
+  is_production: boolean;
+  deed_id: number;
+  register: string | null;
+  segment: number | null;
+  number: number | null;
+  notary_id: number | null;
+  notary_code: string | null;
+  notary_name: string | null;
+}
+
+export interface NotarySearchResult {
+  query: string;
+  candidates: NotaryOption[];
+}
+
+export interface ChangeDeedNotaryResult {
+  system_key: string;
+  system_name: string;
+  dialect: string;
+  is_production: boolean;
+  deed_id: number;
+  preview_only: boolean;
+  register: string | null;
+  segment: number | null;
+  number: number | null;
+  from_notary: NotaryOption | null;
+  to_notary: NotaryOption;
+}
+
+export interface FrameCellChange {
+  column: string;
+  from: unknown;
+  to: unknown;
+}
+
+export interface FrameRowChange {
+  primary_key_value: string | number;
+  cells: FrameCellChange[];
+}
+
+export interface UpdateFrameRowsResult {
+  system_key: string;
+  system_name: string;
+  dialect: string;
+  is_production: boolean;
+  table_name: string;
+  primary_key: string;
+  preview_only: boolean;
+  change_count: number;
+  row_count: number;
+  changes: FrameRowChange[];
+  rows_affected: number;
+}
+
 export interface ReopenBestellingChange {
   action_type: string | null;
   order_id: number | null;

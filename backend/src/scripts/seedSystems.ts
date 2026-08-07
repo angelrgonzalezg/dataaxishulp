@@ -59,12 +59,12 @@ const systems: SeedSystem[] = [
   {
     systemKey: 'kadaster_saba_prod',
     name: 'Kadaster Saba (PROD)',
-    description: 'Production KadasterSaba-BDMigration database',
+    description: 'Production KadasterSaba-Migration database',
     dialect: 'kadaster',
     envVarName: 'SYSTEM_DB_KADASTER_SABA_PROD_URL',
     host: '200.6.147.70',
     port: 1433,
-    databaseName: 'KadasterSaba-BDMigration',
+    databaseName: 'KadasterSaba-Migration',
   },
   {
     systemKey: 'kadaster_bonaire_prod',

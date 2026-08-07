@@ -9,7 +9,7 @@ export interface TableFrame {
   label: string;
   tableName: string;
   primaryKey: string;
-  /** Column editing will be enabled in a later step */
+  /** When true, Support Center may offer direct column edits for this frame. */
   editable: boolean;
   /** Logical group, e.g. andere_details_titles */
   section?: string;
@@ -104,7 +104,7 @@ export interface ParcelSupportLookup extends SupportLookupBase {
     limited_rights_details: number;
     share_details: number;
     order_links: number;
-    /** Orders linked via OrderParcel → OrderProduct (Tereno). */
+    /** Orders linked via parcel → order product path (Tereno OrderParcel / Kadaster AgendaParcelGroup). */
     linked_orders?: Array<{
       order_id: number;
       transaction_id: string | null;

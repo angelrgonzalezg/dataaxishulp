@@ -18,6 +18,11 @@ import type {
   RetireSubjectResult,
   CorrectOwnershipShareResult,
   UpdateDeedLegalFactResult,
+  NotarySearchResult,
+  DeedNotaryState,
+  ChangeDeedNotaryResult,
+  UpdateFrameRowsResult,
+  FrameRowChange,
 } from '@/types';
 
 export async function fetchOrderSupport(orderId: number, systemKey: string) {
@@ -82,6 +87,45 @@ export async function updateDeedLegalFact(
 ) {
   const { data } = await api.post(`/support/deeds/${deedId}/legal-fact`, payload);
   return data.data as UpdateDeedLegalFactResult;
+}
+
+export async function searchNotaries(systemKey: string, q: string) {
+  const { data } = await api.get('/support/notaries/search', {
+    params: { systemKey, q },
+  });
+  return data.data as NotarySearchResult;
+}
+
+export async function fetchDeedNotary(deedId: number, systemKey: string) {
+  const { data } = await api.get(`/support/deeds/${deedId}/notary`, {
+    params: { systemKey },
+  });
+  return data.data as DeedNotaryState;
+}
+
+export async function changeDeedNotary(
+  deedId: number,
+  payload: {
+    systemKey: string;
+    notaryId: number;
+    previewOnly: boolean;
+    confirm?: true;
+  },
+) {
+  const { data } = await api.post(`/support/deeds/${deedId}/notary`, payload);
+  return data.data as ChangeDeedNotaryResult;
+}
+
+export async function updateFrameRows(payload: {
+  systemKey: string;
+  tableName: string;
+  primaryKey: string;
+  changes: FrameRowChange[];
+  previewOnly: boolean;
+  confirm?: true;
+}) {
+  const { data } = await api.post('/support/frames/update-rows', payload);
+  return data.data as UpdateFrameRowsResult;
 }
 
 export async function reopenBestelling(

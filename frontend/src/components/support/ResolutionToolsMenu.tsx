@@ -9,10 +9,12 @@ import { RetireSubjectFromDeedTool } from '@/components/support/RetireSubjectFro
 import { VoidOrderTool } from '@/components/support/VoidOrderTool';
 import { ChangeDeedOnOrderTool } from '@/components/support/ChangeDeedOnOrderTool';
 import { ChangeParcelOnOrderTool } from '@/components/support/ChangeParcelOnOrderTool';
+import { ChangeNotarisTool } from '@/components/support/ChangeNotarisTool';
 import type { DeedTypeAkteOption } from '@/types';
 
 type ResolutionToolId =
   | 'change_type_akte'
+  | 'change_notaris'
   | 'reopen_bestelling'
   | 'retire_subject'
   | 'void_order'
@@ -31,6 +33,7 @@ type ResolutionToolsMenuProps = {
   registerTitleOptions?: string[];
   parcelEsriOptions?: string[];
   showChangeTypeAkte?: boolean;
+  showChangeNotaris?: boolean;
   showReopenBestelling?: boolean;
   showRetireSubject?: boolean;
   showVoidOrder?: boolean;
@@ -50,6 +53,7 @@ export function ResolutionToolsMenu({
   registerTitleOptions = [],
   parcelEsriOptions = [],
   showChangeTypeAkte = true,
+  showChangeNotaris = true,
   showReopenBestelling = true,
   showRetireSubject = true,
   showVoidOrder = true,
@@ -68,6 +72,11 @@ export function ResolutionToolsMenu({
           id: 'change_type_akte' as const,
           label: t('support.tools.changeTypeAkte.title'),
           available: showChangeTypeAkte && isTereno && deeds.length > 0,
+        },
+        {
+          id: 'change_notaris' as const,
+          label: t('support.tools.changeNotaris.title'),
+          available: showChangeNotaris && deeds.length > 0,
         },
         {
           id: 'reopen_bestelling' as const,
@@ -100,6 +109,7 @@ export function ResolutionToolsMenu({
       isTereno,
       orderId,
       showChangeTypeAkte,
+      showChangeNotaris,
       showReopenBestelling,
       showRetireSubject,
       showVoidOrder,
@@ -202,6 +212,38 @@ export function ResolutionToolsMenu({
               {t('support.tools.close')}
             </Button>
             <ChangeTypeAkteTool
+              systemKey={systemKey}
+              isProduction={isProduction}
+              systemName={systemName}
+              deeds={deeds}
+            />
+          </div>
+        </div>
+      )}
+
+      {openTool === 'change_notaris' && (
+        <div
+          className="fixed inset-0 z-40 flex items-start justify-center overflow-y-auto bg-ink-950/40 p-4 sm:p-8"
+          onClick={closeTool}
+          role="presentation"
+        >
+          <div
+            className="relative my-4 w-full max-w-4xl"
+            onClick={(event) => event.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+          >
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              className="absolute right-3 top-3 z-10"
+              onClick={closeTool}
+            >
+              <X style={{ width: 14, height: 14 }} />
+              {t('support.tools.close')}
+            </Button>
+            <ChangeNotarisTool
               systemKey={systemKey}
               isProduction={isProduction}
               systemName={systemName}

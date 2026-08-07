@@ -25,6 +25,8 @@ export function InzageReportPage() {
   const subjectId = params.get('subjectId') ? Number(params.get('subjectId')) : null;
   const objectVariant = (params.get('variant') as InzageObjectVariant) ?? 'object';
   const subjectVariant = (params.get('subjectVariant') as InzageSubjectVariant) ?? 'subject';
+  const returnEntry = params.get('returnEntry');
+  const returnValue = params.get('returnValue');
 
   const isSubject = subjectId != null && subjectId > 0;
 
@@ -54,6 +56,49 @@ export function InzageReportPage() {
     [params, setParams],
   );
 
+  function goBack() {
+    if (isSubject) {
+      const next = new URLSearchParams(params);
+      next.delete('subjectId');
+      next.delete('subjectVariant');
+      setParams(next, { replace: true });
+      return;
+    }
+
+    if (
+      returnEntry &&
+      returnValue &&
+      (returnEntry === 'parcel_number' ||
+        returnEntry === 'meet_brief' ||
+        returnEntry === 'order' ||
+        returnEntry === 'kenmerk' ||
+        returnEntry === 'register_deed' ||
+        returnEntry === 'deed_history')
+    ) {
+      const next = new URLSearchParams({
+        entry: returnEntry,
+        q: returnValue,
+        systemKey,
+        autoload: '1',
+      });
+      navigate(`/support?${next.toString()}`);
+      return;
+    }
+
+    if (parcelId != null && parcelId > 0) {
+      const next = new URLSearchParams({
+        entry: 'parcel_number',
+        q: String(parcelId),
+        systemKey,
+        autoload: '1',
+      });
+      navigate(`/support?${next.toString()}`);
+      return;
+    }
+
+    navigate('/support');
+  }
+
   const isProduction = report?.is_production ?? false;
 
   return (
@@ -63,7 +108,7 @@ export function InzageReportPage() {
       <div className="mx-auto max-w-4xl space-y-6 px-8 py-8">
         <Card className="flex flex-col gap-4 p-4 lg:flex-row lg:items-center lg:justify-between print:hidden">
           <div className="flex items-center gap-3">
-            <Button variant="secondary" size="sm" onClick={() => navigate(-1)}>
+            <Button variant="secondary" size="sm" onClick={goBack}>
               <ArrowLeft style={{ width: 16, height: 16 }} />
               {t('inzage.back')}
             </Button>
