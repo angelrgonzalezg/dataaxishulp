@@ -99,12 +99,12 @@ const systems: SeedSystem[] = [
   {
     systemKey: 'dlv_aruba_prod',
     name: 'DLV Aruba (PROD)',
-    description: 'Production DLV / Tereno Aruba (Azure SQL — requires VPN)',
+    description: 'Production DLV / Tereno Aruba (VPN — 192.168.50.60)',
     dialect: 'tereno',
     envVarName: 'SYSTEM_DB_DLV_ARUBA_PROD_URL',
-    host: 'sql-tereno-dev.database.windows.net',
+    host: '192.168.50.60',
     port: 1433,
-    databaseName: 'sqldb-tereno-dev',
+    databaseName: 'Tereno',
   },
 ];
 

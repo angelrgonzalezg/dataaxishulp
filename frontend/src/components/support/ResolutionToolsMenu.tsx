@@ -10,11 +10,13 @@ import { VoidOrderTool } from '@/components/support/VoidOrderTool';
 import { ChangeDeedOnOrderTool } from '@/components/support/ChangeDeedOnOrderTool';
 import { ChangeParcelOnOrderTool } from '@/components/support/ChangeParcelOnOrderTool';
 import { ChangeNotarisTool } from '@/components/support/ChangeNotarisTool';
+import { VerifyOrderTool } from '@/components/support/VerifyOrderTool';
 import type { DeedTypeAkteOption } from '@/types';
 
 type ResolutionToolId =
   | 'change_type_akte'
   | 'change_notaris'
+  | 'verify_order'
   | 'reopen_bestelling'
   | 'retire_subject'
   | 'void_order'
@@ -34,11 +36,13 @@ type ResolutionToolsMenuProps = {
   parcelEsriOptions?: string[];
   showChangeTypeAkte?: boolean;
   showChangeNotaris?: boolean;
+  showVerifyOrder?: boolean;
   showReopenBestelling?: boolean;
   showRetireSubject?: boolean;
   showVoidOrder?: boolean;
   showChangeParcel?: boolean;
   showChangeDeed?: boolean;
+  onOpenDeedTitle?: (title: string) => void;
 };
 
 export function ResolutionToolsMenu({
@@ -54,11 +58,13 @@ export function ResolutionToolsMenu({
   parcelEsriOptions = [],
   showChangeTypeAkte = true,
   showChangeNotaris = true,
+  showVerifyOrder = true,
   showReopenBestelling = true,
   showRetireSubject = true,
   showVoidOrder = true,
   showChangeParcel = true,
   showChangeDeed = true,
+  onOpenDeedTitle,
 }: ResolutionToolsMenuProps) {
   const { t } = useTranslation();
   const [selectedTool, setSelectedTool] = useState<ResolutionToolId | ''>('');
@@ -77,6 +83,11 @@ export function ResolutionToolsMenu({
           id: 'change_notaris' as const,
           label: t('support.tools.changeNotaris.title'),
           available: showChangeNotaris && deeds.length > 0,
+        },
+        {
+          id: 'verify_order' as const,
+          label: t('support.tools.verifyOrder.title'),
+          available: showVerifyOrder && isTereno && orderId != null && orderId > 0,
         },
         {
           id: 'reopen_bestelling' as const,
@@ -110,6 +121,7 @@ export function ResolutionToolsMenu({
       orderId,
       showChangeTypeAkte,
       showChangeNotaris,
+      showVerifyOrder,
       showReopenBestelling,
       showRetireSubject,
       showVoidOrder,
@@ -248,6 +260,46 @@ export function ResolutionToolsMenu({
               isProduction={isProduction}
               systemName={systemName}
               deeds={deeds}
+            />
+          </div>
+        </div>
+      )}
+
+      {openTool === 'verify_order' && orderId != null && orderId > 0 && (
+        <div
+          className="fixed inset-0 z-40 flex items-start justify-center overflow-y-auto bg-ink-950/40 p-4 sm:p-8"
+          onClick={closeTool}
+          role="presentation"
+        >
+          <div
+            className="relative my-4 w-full max-w-4xl"
+            onClick={(event) => event.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+          >
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              className="absolute right-3 top-3 z-10"
+              onClick={closeTool}
+            >
+              <X style={{ width: 14, height: 14 }} />
+              {t('support.tools.close')}
+            </Button>
+            <VerifyOrderTool
+              systemKey={systemKey}
+              isProduction={isProduction}
+              systemName={systemName}
+              orderId={orderId}
+              onOpenDeedTitle={
+                onOpenDeedTitle
+                  ? (title) => {
+                      closeTool();
+                      onOpenDeedTitle(title);
+                    }
+                  : undefined
+              }
             />
           </div>
         </div>

@@ -62,17 +62,23 @@ async function resolveParcelRows(
     throw new ValidationError('Provide parcelId or meetBrief');
   }
 
-  // Exact match first (e.g. 0/1949), then contains fallback
+  // Exact match first (e.g. 0/1949 or ESRI-like codes), then contains fallback.
+  // Kadaster stores meet brief in MeetbriefInf and may also keep an ESRI-style code in PerceelESRI.
   let parcels = await querySafe(
     systemKey,
-    'SELECT * FROM PerceelTb WHERE MeetbriefInf = @meetBrief',
+    `SELECT * FROM PerceelTb
+     WHERE MeetbriefInf = @meetBrief
+        OR PerceelESRI = @meetBrief`,
     { meetBrief },
   );
 
   if (parcels.length === 0) {
     parcels = await querySafe(
       systemKey,
-      'SELECT * FROM PerceelTb WHERE MeetbriefInf LIKE @meetBriefLike ORDER BY PerceelNummer',
+      `SELECT * FROM PerceelTb
+       WHERE MeetbriefInf LIKE @meetBriefLike
+          OR PerceelESRI LIKE @meetBriefLike
+       ORDER BY PerceelNummer`,
       { meetBriefLike: `%${meetBrief}%` },
     );
   }

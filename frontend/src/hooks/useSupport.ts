@@ -11,6 +11,7 @@ import {
   lookupRetireSubjectCandidates,
   reopenBestelling,
   voidOrder,
+  verifyOrder,
   fetchOrderParcelLinks,
   searchParcelByEsri,
   changeOrderParcel,
@@ -262,6 +263,13 @@ export function useVoidOrder() {
         });
       }
     },
+  });
+}
+
+export function useVerifyOrder() {
+  return useMutation({
+    mutationFn: ({ orderId, systemKey }: { orderId: number; systemKey: string }) =>
+      verifyOrder(orderId, systemKey),
   });
 }
 

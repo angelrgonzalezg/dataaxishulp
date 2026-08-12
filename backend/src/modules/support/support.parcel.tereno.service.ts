@@ -59,16 +59,38 @@ async function resolveTerenoParcelRows(
     throw new ValidationError('Provide parcelId or meetBrief');
   }
 
-  let parcels = await querySafe(systemKey, 'SELECT * FROM Parcel WHERE esri = @meetBrief', {
-    meetBrief,
-  });
+  // Tereno Parcel.esri holds values like "1-K-3424". Exact first, then contains.
+  let parcels = await querySafe(
+    systemKey,
+    `SELECT * FROM Parcel
+     WHERE esri = @meetBrief
+        OR LTRIM(RTRIM(esri)) = @meetBrief`,
+    { meetBrief },
+  );
 
   if (parcels.length === 0) {
     parcels = await querySafe(
       systemKey,
-      'SELECT * FROM Parcel WHERE esri LIKE @meetBriefLike ORDER BY id',
+      `SELECT * FROM Parcel
+       WHERE esri LIKE @meetBriefLike
+       ORDER BY id`,
       { meetBriefLike: `%${meetBrief}%` },
     );
+  }
+
+  // Also try without spaces around hyphens (e.g. "1 - K - 3424" → "1-K-3424")
+  if (parcels.length === 0) {
+    const compact = meetBrief.replace(/\s+/g, '');
+    if (compact !== meetBrief) {
+      parcels = await querySafe(
+        systemKey,
+        `SELECT * FROM Parcel
+         WHERE REPLACE(esri, ' ', '') = @compact
+            OR REPLACE(esri, ' ', '') LIKE @compactLike
+         ORDER BY id`,
+        { compact, compactLike: `%${compact}%` },
+      );
+    }
   }
 
   return { parcels, entry: 'meet_brief' };

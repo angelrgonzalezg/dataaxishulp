@@ -33,6 +33,7 @@ export interface OrderDeedLinksResult {
 export interface DeedTitleCandidate {
   deed_id: number;
   register_title: string;
+  approval_id: number | null;
 }
 
 export interface DeedTitleSearchResult {
@@ -116,7 +117,8 @@ export async function resolveDeedByTitle(
   const cols = dialectCols(dialect);
   const deeds = await querySystem(
     systemKey,
-    `SELECT d.id, d.[segment], d.[number], lfr.register
+    `SELECT d.id, d.[segment], d.[number], lfr.register,
+            ${cols.tereno ? 'd.approvalId AS approvalId' : 'CAST(NULL AS INT) AS approvalId'}
      FROM Deed d
      INNER JOIN LegalFactRegister lfr ON lfr.id = d.${cols.registerFk}
      WHERE UPPER(LTRIM(RTRIM(lfr.register))) = @registerCode
@@ -142,6 +144,7 @@ export async function resolveDeedByTitle(
       return {
         deed_id: deedId,
         register_title: title,
+        approval_id: getFieldNumber(deed, 'approvalId', 'ApprovalId'),
       };
     })
     .filter((item): item is DeedTitleCandidate => item != null);

@@ -11,6 +11,7 @@ import { ResolutionToolsMenu } from '@/components/support/ResolutionToolsMenu';
 import { ProductionEnvironmentBanner } from '@/components/support/ProductionEnvironmentBanner';
 import { TableFrameCard } from '@/components/support/TableFrameCard';
 import { extractErrorMessage } from '@/api/client';
+import toast from 'react-hot-toast';
 import {
   useDeedHistorySupport,
   useOrderSupport,
@@ -554,6 +555,15 @@ export function SupportCenterPage() {
   }
 
   function selectCandidateParcel(parcelId: number) {
+    rememberOrderReturnFromCurrentLookup();
+    setParcelReturn(null);
+    setEntryMode('parcel_number');
+    setParcelInput(String(parcelId));
+    clearActiveLookups();
+    setActiveParcelId(parcelId);
+  }
+
+  function rememberOrderReturnFromCurrentLookup() {
     if (
       (entryMode === 'order' || entryMode === 'kenmerk' || entryMode === 'register_deed') &&
       data &&
@@ -569,11 +579,81 @@ export function SupportCenterPage() {
         registerTitle: data.register_title ?? data.summary?.register_title ?? null,
       });
     }
+  }
+
+  function openDeedHistoryFromOrder(title: string) {
+    const trimmed = title.trim();
+    if (!trimmed) {
+      toast.error(t('support.deedTitleMissing'));
+      return;
+    }
+    rememberOrderReturnFromCurrentLookup();
     setParcelReturn(null);
-    setEntryMode('parcel_number');
-    setParcelInput(String(parcelId));
+    setEntryMode('deed_history');
+    setDeedHistoryInput(trimmed);
     clearActiveLookups();
-    setActiveParcelId(parcelId);
+    setActiveDeedHistoryTitle(trimmed);
+  }
+
+  function resolveTitleFromRow(row: Record<string, unknown>): string | null {
+    return (
+      asNullableString(row.title) ??
+      asNullableString(row.Title) ??
+      asNullableString(row.Akte) ??
+      asNullableString(row.akte)
+    );
+  }
+
+  function isDeedNavigableCell(info: {
+    frameKey: string;
+    column: string;
+    value: unknown;
+    row: Record<string, unknown>;
+  }): boolean {
+    if (
+      entryMode !== 'order' &&
+      entryMode !== 'kenmerk' &&
+      entryMode !== 'register_deed'
+    ) {
+      return false;
+    }
+    const frameKey = info.frameKey.toLowerCase();
+    if (frameKey !== 'order_deeds' && frameKey !== 'deeds') return false;
+    const col = info.column.toLowerCase();
+    if (col === 'title' || col === 'akte') {
+      return Boolean(asNullableString(info.value)?.trim());
+    }
+    if (col === 'deedid') {
+      const deedId = asNullableNumber(info.value);
+      return deedId != null && deedId > 0 && Boolean(resolveTitleFromRow(info.row)?.trim());
+    }
+    if (frameKey === 'deeds' && col === 'id') {
+      const deedId = asNullableNumber(info.value);
+      return deedId != null && deedId > 0 && Boolean(resolveTitleFromRow(info.row)?.trim());
+    }
+    return false;
+  }
+
+  function onNavigateFrameCell(info: {
+    frameKey: string;
+    column: string;
+    value: unknown;
+    row: Record<string, unknown>;
+  }) {
+    const col = info.column.toLowerCase();
+    if (col === 'title' || col === 'akte') {
+      const title = asNullableString(info.value)?.trim();
+      if (title) openDeedHistoryFromOrder(title);
+      return;
+    }
+    if (col === 'deedid' || (info.frameKey.toLowerCase() === 'deeds' && col === 'id')) {
+      const title = resolveTitleFromRow(info.row)?.trim();
+      if (title) {
+        openDeedHistoryFromOrder(title);
+        return;
+      }
+      toast.error(t('support.deedTitleMissing'));
+    }
   }
 
   function selectCandidateOrder(orderId: number) {
@@ -685,7 +765,9 @@ export function SupportCenterPage() {
             ? 'C 23-92'
             : entryMode === 'parcel_number'
               ? '12255'
-              : '0/1949';
+              : isTerenoDialect(selectedSystem?.dialect)
+                ? '1-K-3424'
+                : '0/1949';
 
   const isProduction = selectedSystem?.is_production ?? data?.is_production ?? false;
   const isOrderLikeEntry =
@@ -858,7 +940,7 @@ export function SupportCenterPage() {
         </Card>
       )}
 
-      {orderReturn && isParcelLikeEntry && (
+      {orderReturn && (isParcelLikeEntry || isDeedHistoryEntry) && (
         <Card className="flex flex-col gap-3 border-brand-200 bg-brand-50/40 p-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <p className="text-sm font-bold text-ink-900">{t('support.backToOrderTitle')}</p>
@@ -895,6 +977,7 @@ export function SupportCenterPage() {
           showVoidOrder={showVoidOrderTool}
           showChangeParcel={showChangeParcelTool}
           showChangeDeed={showChangeDeedTool}
+          onOpenDeedTitle={openDeedHistoryFromOrder}
         />
       )}
 
@@ -1279,6 +1362,8 @@ export function SupportCenterPage() {
                   systemKey={selectedSystem?.system_key ?? data.system_key}
                   isProduction={isProduction}
                   systemName={selectedSystem?.name ?? data.system_name}
+                  isNavigableCell={isDeedNavigableCell}
+                  onNavigateCell={onNavigateFrameCell}
                 />
               ))}
             </div>

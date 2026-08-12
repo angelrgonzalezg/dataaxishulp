@@ -35,6 +35,7 @@ import {
   listOrderDeedLinks,
   resolveDeedByTitle,
 } from './support.order.change.deed.service';
+import { verifyOrder } from './support.order.verify.service';
 import {
   lookupRetireSubjectCandidates,
   retireSubjectFromDeed,
@@ -679,6 +680,26 @@ router.get(
         systemKey,
       });
       res.json(successResponse(data));
+    } catch (error) {
+      next(error);
+    }
+  },
+);
+
+router.get(
+  '/orders/:orderId/verify',
+  requirePermission('support.view'),
+  validate(orderParamsSchema, 'params'),
+  validate(systemKeySchema, 'query'),
+  async (req, res, next) => {
+    try {
+      const systemKey =
+        (req.query.systemKey as string | undefined)?.trim() || DEFAULT_SYSTEM_KEY;
+      const data = await verifyOrder({
+        orderId: Number(req.params.orderId),
+        systemKey,
+      });
+      res.json(successResponse(data, 'Order verification'));
     } catch (error) {
       next(error);
     }

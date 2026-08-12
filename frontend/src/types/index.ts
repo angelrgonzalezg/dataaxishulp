@@ -471,6 +471,40 @@ export interface VoidOrderResult {
   already_voided: boolean;
 }
 
+export interface VerifyOrderDeedLine {
+  order_deed_id: number | null;
+  order_product_id: number | null;
+  deed_id: number | null;
+  title: string | null;
+  amount: number | null;
+  price: number | null;
+  unit_price: number | null;
+  product_code: string | null;
+  product_name: string | null;
+}
+
+export interface VerifyOrderPriceCheck {
+  check_key: 'order_deed_price_vs_order_total';
+  ok: boolean;
+  order_total_price: number | null;
+  order_deed_price_sum: number;
+  difference: number | null;
+  tolerance: number;
+  line_count: number;
+  lines: VerifyOrderDeedLine[];
+  message: string;
+}
+
+export interface VerifyOrderResult {
+  system_key: string;
+  system_name: string;
+  dialect: string;
+  is_production: boolean;
+  order_id: number;
+  checks: VerifyOrderPriceCheck[];
+  all_ok: boolean;
+}
+
 export interface OrderParcelLink {
   link_id: number;
   order_product_id: number;
@@ -540,6 +574,7 @@ export interface OrderDeedLinksResult {
 export interface DeedTitleCandidate {
   deed_id: number;
   register_title: string;
+  approval_id: number | null;
 }
 
 export interface DeedTitleSearchResult {

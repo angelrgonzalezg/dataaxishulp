@@ -22,11 +22,21 @@ type ChangeDeedOnOrderToolProps = {
   orderId: number;
 };
 
-function formatDeed(id: number | null, title: string | null): string {
-  if (id != null && title) return `#${id} · ${title}`;
-  if (id != null) return `#${id}`;
-  if (title) return title;
-  return '—';
+function formatDeed(
+  id: number | null,
+  title: string | null,
+  approvalId?: number | null,
+): string {
+  const base =
+    id != null && title
+      ? `#${id} · ${title}`
+      : id != null
+        ? `#${id}`
+        : title
+          ? title
+          : '—';
+  if (approvalId == null) return `${base} · approvalId=—`;
+  return `${base} · approvalId=${approvalId}`;
 }
 
 export function ChangeDeedOnOrderTool({
@@ -80,9 +90,10 @@ export function ChangeDeedOnOrderTool({
     try {
       const result = await searchMutation.mutateAsync({ systemKey, title });
       setCandidates(result.candidates);
-      setSelectedDeedId(
-        result.candidates.length === 1 ? result.candidates[0].deed_id : '',
-      );
+      const preferred =
+        result.candidates.find((item) => item.approval_id === 3) ??
+        (result.candidates.length === 1 ? result.candidates[0] : null);
+      setSelectedDeedId(preferred ? preferred.deed_id : '');
       setPreview(null);
       if (result.candidates.length === 0) {
         toast(t('support.tools.changeDeed.noDeedFound'));
@@ -274,7 +285,11 @@ export function ChangeDeedOnOrderTool({
                 <option value="">{t('support.tools.changeDeed.pickDeed')}</option>
                 {candidates.map((candidate) => (
                   <option key={candidate.deed_id} value={candidate.deed_id}>
-                    {formatDeed(candidate.deed_id, candidate.register_title)}
+                    {formatDeed(
+                      candidate.deed_id,
+                      candidate.register_title,
+                      candidate.approval_id,
+                    )}
                   </option>
                 ))}
               </Select>

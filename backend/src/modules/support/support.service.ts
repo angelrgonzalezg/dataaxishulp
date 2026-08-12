@@ -11,6 +11,7 @@ import {
   querySafe,
   resolveSupportSystem,
 } from './support.frames';
+import { attachDeedTitleColumn, mapDeedTitlesById } from './support.deedTitle';
 import type { OrderCandidate, OrderSupportLookup, TableFrame } from './support.types';
 import { lookupOrderByIdTereno } from './support.order.tereno.service';
 
@@ -187,12 +188,35 @@ export async function lookupOrderById(
   }
 
   const orderDeeds = await queryByIds(systemKey, 'AgendaAkteGroup', 'AgendaO_ID', orderProductIds);
-  frames.push(buildFrame('order_deeds', 'Order deeds (links)', 'AgendaAkteGroup', 'ID', orderDeeds));
+  const deedIds = [
+    ...new Set([
+      ...asNumberIds(orderDeeds, 'deedId'),
+      ...asNumberIds(orderDeeds, 'DeedId'),
+    ]),
+  ];
+  const dialect = system.dialect;
+  const deedTitles = await mapDeedTitlesById(systemKey, dialect, deedIds);
+  frames.push(
+    buildFrame(
+      'order_deeds',
+      'Order deeds (links)',
+      'AgendaAkteGroup',
+      'ID',
+      attachDeedTitleColumn(orderDeeds, deedTitles, ['deedId', 'DeedId']),
+    ),
+  );
 
-  const deedIds = asNumberIds(orderDeeds, 'deedId');
   if (deedIds.length > 0) {
     const deeds = await queryByIds(systemKey, 'Deed', 'id', deedIds);
-    frames.push(buildFrame('deeds', 'Deeds', 'Deed', 'id', deeds));
+    frames.push(
+      buildFrame(
+        'deeds',
+        'Deeds',
+        'Deed',
+        'id',
+        attachDeedTitleColumn(deeds, deedTitles, ['id', 'Id']),
+      ),
+    );
   }
 
   const workflowFacts = await queryByIds(systemKey, 'WorkflowStepFact', 'orderProductId', orderProductIds);

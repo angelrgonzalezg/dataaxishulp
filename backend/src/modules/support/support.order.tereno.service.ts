@@ -8,6 +8,7 @@ import {
   querySafe,
   resolveSupportSystem,
 } from './support.frames';
+import { attachDeedTitleColumn, mapDeedTitlesById } from './support.deedTitle';
 import type { OrderSupportLookup, TableFrame } from './support.types';
 
 function insertAfter(
@@ -188,12 +189,29 @@ export async function lookupOrderByIdTereno(
   }
 
   const orderDeeds = await queryByIds(systemKey, 'OrderDeed', 'orderProductId', orderProductIds);
-  frames.push(buildFrame('order_deeds', 'Order deeds', 'OrderDeed', 'id', orderDeeds));
-
   const deedIds = asNumberIds(orderDeeds, 'deedId');
+  const deedTitles = await mapDeedTitlesById(systemKey, system.dialect, deedIds);
+  frames.push(
+    buildFrame(
+      'order_deeds',
+      'Order deeds',
+      'OrderDeed',
+      'id',
+      attachDeedTitleColumn(orderDeeds, deedTitles, ['deedId', 'DeedId']),
+    ),
+  );
+
   if (deedIds.length > 0) {
     const deeds = await queryByIds(systemKey, 'Deed', 'id', deedIds);
-    frames.push(buildFrame('deeds', 'Deeds', 'Deed', 'id', deeds));
+    frames.push(
+      buildFrame(
+        'deeds',
+        'Deeds',
+        'Deed',
+        'id',
+        attachDeedTitleColumn(deeds, deedTitles, ['id', 'Id']),
+      ),
+    );
   }
 
   const workflowFacts = await queryByIds(systemKey, 'WorkflowStepFact', 'orderProductId', orderProductIds);

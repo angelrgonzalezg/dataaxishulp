@@ -23,6 +23,19 @@ type TableFrameCardProps = {
   systemKey: string;
   isProduction: boolean;
   systemName: string;
+  /** When set, matching cells render as navigation links (e.g. deedId / title). */
+  onNavigateCell?: (info: {
+    frameKey: string;
+    column: string;
+    value: unknown;
+    row: Record<string, unknown>;
+  }) => void;
+  isNavigableCell?: (info: {
+    frameKey: string;
+    column: string;
+    value: unknown;
+    row: Record<string, unknown>;
+  }) => boolean;
 };
 
 function cellValue(value: unknown): string {
@@ -172,6 +185,8 @@ export function TableFrameCard({
   systemKey,
   isProduction,
   systemName,
+  onNavigateCell,
+  isNavigableCell,
 }: TableFrameCardProps) {
   const { t } = useTranslation();
   const { can } = usePermissions();
@@ -426,20 +441,63 @@ export function TableFrameCard({
                           }
                           className="min-w-[10rem] font-mono text-xs"
                         />
-                      ) : (
-                        <span
-                          className={cn(
-                            'block max-w-xs truncate text-xs text-ink-700',
-                            column.isPrimaryKey && 'font-semibold text-brand-800',
-                            /description|Description|Name|nameNl|nameNe/.test(column.name)
-                              ? 'max-w-md font-sans text-ink-800'
-                              : 'font-mono',
-                          )}
-                          title={cellValue(row[column.name])}
-                        >
-                          {cellValue(row[column.name]) || '—'}
-                        </span>
-                      )}
+                      ) : (() => {
+                        const raw = row[column.name];
+                        const text = cellValue(raw);
+                        const navigable =
+                          !editing &&
+                          Boolean(text) &&
+                          Boolean(onNavigateCell) &&
+                          (isNavigableCell?.({
+                            frameKey: frame.key,
+                            column: column.name,
+                            value: raw,
+                            row,
+                          }) ??
+                            false);
+
+                        if (navigable && onNavigateCell) {
+                          return (
+                            <button
+                              type="button"
+                              className={cn(
+                                'block max-w-xs truncate text-left text-xs font-semibold text-brand-700 underline decoration-brand-300 underline-offset-2 hover:text-brand-900',
+                                /description|Description|Name|nameNl|nameNe|title|Title|Akte/.test(
+                                  column.name,
+                                )
+                                  ? 'max-w-md font-sans'
+                                  : 'font-mono',
+                              )}
+                              title={t('support.openLinkedDeedHint', { value: text })}
+                              onClick={() =>
+                                onNavigateCell({
+                                  frameKey: frame.key,
+                                  column: column.name,
+                                  value: raw,
+                                  row,
+                                })
+                              }
+                            >
+                              {text}
+                            </button>
+                          );
+                        }
+
+                        return (
+                          <span
+                            className={cn(
+                              'block max-w-xs truncate text-xs text-ink-700',
+                              column.isPrimaryKey && 'font-semibold text-brand-800',
+                              /description|Description|Name|nameNl|nameNe/.test(column.name)
+                                ? 'max-w-md font-sans text-ink-800'
+                                : 'font-mono',
+                            )}
+                            title={text}
+                          >
+                            {text || '—'}
+                          </span>
+                        );
+                      })()}
                     </td>
                   ))}
                 </tr>

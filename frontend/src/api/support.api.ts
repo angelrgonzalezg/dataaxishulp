@@ -7,6 +7,7 @@ import type {
   ParcelSupportLookup,
   ReopenBestellingResult,
   VoidOrderResult,
+  VerifyOrderResult,
   OrderParcelLinksResult,
   ParcelEsriSearchResult,
   ChangeOrderParcelResult,
@@ -151,6 +152,13 @@ export async function voidOrder(
 ) {
   const { data } = await api.post(`/support/orders/${orderId}/void`, payload);
   return data.data as VoidOrderResult;
+}
+
+export async function verifyOrder(orderId: number, systemKey: string) {
+  const { data } = await api.get(`/support/orders/${orderId}/verify`, {
+    params: { systemKey },
+  });
+  return data.data as VerifyOrderResult;
 }
 
 export async function fetchOrderParcelLinks(orderId: number, systemKey: string) {
