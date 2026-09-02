@@ -1,5 +1,6 @@
 import { prisma } from '../../config/db';
 import { getMondayDashboardSummary } from '../monday/monday.service';
+import { getJiraDashboardSummary } from '../jira/jira.service';
 
 export async function getDashboardOverview() {
   const [
@@ -13,6 +14,7 @@ export async function getDashboardOverview() {
     recentIssues,
     bySystem,
     mondaySummary,
+    jiraSummary,
   ] = await Promise.all([
     prisma.issue.count(),
     prisma.issue.count({ where: { status: 'open' } }),
@@ -34,6 +36,7 @@ export async function getDashboardOverview() {
       _count: { issueId: true },
     }),
     getMondayDashboardSummary(),
+    getJiraDashboardSummary(),
   ]);
 
   const systemRows = await prisma.systemConnection.findMany({
@@ -53,6 +56,7 @@ export async function getDashboardOverview() {
       systems,
     },
     monday: mondaySummary,
+    jira: jiraSummary,
     by_system: bySystem.map((item) => ({
       system_id: item.systemId,
       name: systemNameById[item.systemId] ?? `System ${item.systemId}`,
@@ -66,7 +70,11 @@ export async function getDashboardOverview() {
       system_name: issue.system.name,
       assigned_to: issue.assignedTo?.fullName ?? issue.assignedTo?.username ?? null,
       updated_at: issue.updatedAt,
-      source: issue.externalRef?.startsWith('monday:') ? 'monday' : 'local',
+      source: issue.externalRef?.startsWith('monday:')
+        ? 'monday'
+        : issue.externalRef?.startsWith('jira:')
+          ? 'jira'
+          : 'local',
     })),
   };
 }

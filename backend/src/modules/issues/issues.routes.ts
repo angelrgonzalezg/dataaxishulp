@@ -10,6 +10,8 @@ import {
   issueUpdateSchema,
   mondayBoardQuerySchema,
   mondayItemIdParamsSchema,
+  jiraIssueKeyParamsSchema,
+  jiraProjectQuerySchema,
 } from './issues.validation';
 
 const router = Router();
@@ -21,6 +23,13 @@ router.post(
   requirePermission('issues.create'),
   validate(mondayItemIdParamsSchema, 'params'),
   controller.importMondayItem,
+);
+router.get('/jira/items', requirePermission('issues.view'), validate(jiraProjectQuerySchema, 'query'), controller.listJiraItems);
+router.post(
+  '/jira/items/:jiraIssueKey/import',
+  requirePermission('issues.create'),
+  validate(jiraIssueKeyParamsSchema, 'params'),
+  controller.importJiraItem,
 );
 router.get('/:id', requirePermission('issues.view'), validate(issueIdParamsSchema, 'params'), controller.getById);
 router.post('/', requirePermission('issues.create'), validate(issueCreateSchema), controller.create);

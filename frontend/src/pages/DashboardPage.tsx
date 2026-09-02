@@ -1,3 +1,4 @@
+import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { motion } from 'framer-motion';
@@ -16,6 +17,10 @@ import { Card, CardHeader } from '@/components/ui/Card';
 import { useAuth } from '@/hooks/useAuth';
 import { useDashboardOverview } from '@/hooks/useDashboard';
 import { mondayBoardBarColor } from '@/lib/mondayBoardThemes';
+import type { JiraDashboardSummary, MondayDashboardSummary } from '@/types';
+
+const DASHBOARD_SOURCE_KEY = 'dataaxis-hulp-dashboard-issue-source';
+type IssueSource = 'monday' | 'jira';
 
 function StatCard({
   icon,
@@ -45,11 +50,172 @@ function StatCard({
   );
 }
 
+function ExternalSourcePanel({
+  source,
+  monday,
+  jira,
+  isFetching,
+  onRefresh,
+}: {
+  source: IssueSource;
+  monday: MondayDashboardSummary | null | undefined;
+  jira: JiraDashboardSummary | null | undefined;
+  isFetching: boolean;
+  onRefresh: () => void;
+}) {
+  const { t } = useTranslation();
+  const isMonday = source === 'monday';
+  const summary = isMonday ? monday : jira;
+
+  if (!summary?.configured) {
+    return (
+      <Card className="p-6 text-sm text-ink-500">
+        {isMonday ? t('dashboard.monday.notConfigured') : t('dashboard.jira.notConfigured')}
+      </Card>
+    );
+  }
+
+  const rows = isMonday
+    ? (monday?.by_board ?? []).map((board) => ({
+        key: board.board_key,
+        label: board.label,
+        open: board.open,
+        done: board.done,
+        total: board.total,
+      }))
+    : (jira?.by_project ?? []).map((project) => ({
+        key: project.project_key,
+        label: project.label,
+        open: project.open,
+        done: project.done,
+        total: project.total,
+      }));
+
+  const subtitleBits = [
+    isMonday ? t('dashboard.monday.subtitle') : t('dashboard.jira.subtitle'),
+    isMonday ? monday?.workspace : jira?.site,
+  ].filter(Boolean);
+
+  return (
+    <Card>
+      <div className="flex flex-col gap-3 border-b border-ink-100 px-6 py-4 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h3 className="flex items-center gap-2 text-base font-extrabold text-ink-900">
+            <ExternalLink style={{ width: 20, height: 20 }} className="text-brand-600" />
+            {isMonday ? t('dashboard.monday.title') : t('dashboard.jira.title')}
+          </h3>
+          <p className="mt-1 text-sm text-ink-500">
+            {subtitleBits.join(' · ')}
+            {summary.last_synced_at && (
+              <>
+                {' '}
+                · {isMonday ? t('dashboard.monday.lastSynced') : t('dashboard.jira.lastSynced')}{' '}
+                {new Date(summary.last_synced_at).toLocaleString()}
+              </>
+            )}
+          </p>
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+          <Link to={isMonday ? '/issues?tab=monday' : '/issues?tab=jira'}>
+            <Button variant="secondary" size="sm">
+              {isMonday ? t('dashboard.monday.viewInbox') : t('dashboard.jira.viewInbox')}
+            </Button>
+          </Link>
+          <Button variant="secondary" size="sm" loading={isFetching} onClick={onRefresh}>
+            <RefreshCw style={{ width: 14, height: 14 }} />
+            {isMonday ? t('dashboard.monday.refresh') : t('dashboard.jira.refresh')}
+          </Button>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 gap-4 p-6 lg:grid-cols-4">
+        <div>
+          <p className="text-2xl font-extrabold text-amber-600">{summary.totals.open}</p>
+          <p className="text-sm text-ink-600">
+            {isMonday ? t('dashboard.monday.open') : t('dashboard.jira.open')}
+          </p>
+        </div>
+        <div>
+          <p className="text-2xl font-extrabold text-emerald-600">{summary.totals.done}</p>
+          <p className="text-sm text-ink-600">
+            {isMonday ? t('dashboard.monday.done') : t('dashboard.jira.done')}
+          </p>
+        </div>
+        <div>
+          <p className="text-2xl font-extrabold text-ink-900">{summary.totals.total}</p>
+          <p className="text-sm text-ink-600">
+            {isMonday ? t('dashboard.monday.total') : t('dashboard.jira.total')}
+          </p>
+        </div>
+        <div>
+          <p className="text-2xl font-extrabold text-brand-600">{summary.totals.imported_local}</p>
+          <p className="text-sm text-ink-600">
+            {isMonday ? t('dashboard.monday.imported') : t('dashboard.jira.imported')}
+          </p>
+        </div>
+      </div>
+
+      {rows.length > 0 && (
+        <div className="space-y-3 border-t border-ink-100 px-6 pb-6 pt-4">
+          <p className="text-xs font-bold uppercase tracking-wide text-ink-500">
+            {isMonday ? t('dashboard.monday.byBoard') : t('dashboard.jira.byProject')}
+          </p>
+          {rows.map((row) => (
+            <div key={row.key}>
+              <div className="flex items-center justify-between gap-4 text-sm">
+                <span className="font-medium text-ink-700">{row.label}</span>
+                <span className="shrink-0 text-ink-500">
+                  {row.open} {t('issues.monday.openItems')} · {row.done} Done · {row.total} total
+                </span>
+              </div>
+              <div className="mt-1.5 flex h-2 w-full overflow-hidden rounded-full bg-ink-100">
+                <div
+                  className={`h-full ${mondayBoardBarColor(row.key)}`}
+                  style={{
+                    width: `${Math.min(100, (row.open / Math.max(row.total, 1)) * 100)}%`,
+                  }}
+                />
+                <div
+                  className="h-full bg-emerald-300"
+                  style={{
+                    width: `${Math.min(100, (row.done / Math.max(row.total, 1)) * 100)}%`,
+                  }}
+                />
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </Card>
+  );
+}
+
 export function DashboardPage() {
   const { t } = useTranslation();
   const { user } = useAuth();
   const { data, isLoading, isError, refetch, isFetching } = useDashboardOverview();
-  const monday = data?.monday;
+  const [source, setSource] = useState<IssueSource>(() => {
+    const stored = localStorage.getItem(DASHBOARD_SOURCE_KEY);
+    return stored === 'jira' ? 'jira' : 'monday';
+  });
+
+  useEffect(() => {
+    localStorage.setItem(DASHBOARD_SOURCE_KEY, source);
+  }, [source]);
+
+  const availableSources = useMemo(() => {
+    const list: IssueSource[] = [];
+    if (data?.monday?.configured) list.push('monday');
+    if (data?.jira?.configured) list.push('jira');
+    return list;
+  }, [data?.monday?.configured, data?.jira?.configured]);
+
+  useEffect(() => {
+    if (availableSources.length === 0) return;
+    if (!availableSources.includes(source)) {
+      setSource(availableSources[0]);
+    }
+  }, [availableSources, source]);
 
   return (
     <div className="mx-auto max-w-6xl space-y-6">
@@ -117,91 +283,46 @@ export function DashboardPage() {
             />
           </div>
 
-          {monday?.configured && (
-            <Card>
-              <div className="flex flex-col gap-3 border-b border-ink-100 px-6 py-4 sm:flex-row sm:items-center sm:justify-between">
-                <div>
-                  <h3 className="flex items-center gap-2 text-base font-extrabold text-ink-900">
-                    <ExternalLink style={{ width: 20, height: 20 }} className="text-brand-600" />
-                    {t('dashboard.monday.title')}
-                  </h3>
-                  <p className="mt-1 text-sm text-ink-500">
-                    {t('dashboard.monday.subtitle')}
-                    {monday.workspace ? ` · ${monday.workspace}` : ''}
-                    {monday.last_synced_at && (
-                      <>
-                        {' '}
-                        · {t('dashboard.monday.lastSynced')}{' '}
-                        {new Date(monday.last_synced_at).toLocaleString()}
-                      </>
-                    )}
-                  </p>
-                </div>
-                <div className="flex shrink-0 items-center gap-2">
-                  <Link to="/issues?tab=monday">
-                    <Button variant="secondary" size="sm">
-                      {t('dashboard.monday.viewInbox')}
-                    </Button>
-                  </Link>
-                  <Button variant="secondary" size="sm" loading={isFetching} onClick={() => refetch()}>
-                    <RefreshCw style={{ width: 14, height: 14 }} />
-                    {t('dashboard.monday.refresh')}
-                  </Button>
-                </div>
+          {availableSources.length > 0 && (
+            <div className="space-y-3">
+              <div className="flex flex-wrap items-center gap-2">
+                <p className="mr-1 text-sm font-semibold text-ink-700">
+                  {t('dashboard.sourceLabel')}
+                </p>
+                <button
+                  type="button"
+                  disabled={!data.monday?.configured}
+                  onClick={() => setSource('monday')}
+                  className={`rounded-xl px-4 py-2 text-sm font-semibold transition ${
+                    source === 'monday'
+                      ? 'bg-brand-600 text-white'
+                      : 'bg-ink-100 text-ink-700 hover:bg-ink-200 disabled:cursor-not-allowed disabled:opacity-40'
+                  }`}
+                >
+                  {t('dashboard.sourceMonday')}
+                </button>
+                <button
+                  type="button"
+                  disabled={!data.jira?.configured}
+                  onClick={() => setSource('jira')}
+                  className={`rounded-xl px-4 py-2 text-sm font-semibold transition ${
+                    source === 'jira'
+                      ? 'bg-brand-600 text-white'
+                      : 'bg-ink-100 text-ink-700 hover:bg-ink-200 disabled:cursor-not-allowed disabled:opacity-40'
+                  }`}
+                >
+                  {t('dashboard.sourceJira')}
+                </button>
               </div>
 
-              <div className="grid grid-cols-2 gap-4 p-6 lg:grid-cols-4">
-                <div>
-                  <p className="text-2xl font-extrabold text-amber-600">{monday.totals.open}</p>
-                  <p className="text-sm text-ink-600">{t('dashboard.monday.open')}</p>
-                </div>
-                <div>
-                  <p className="text-2xl font-extrabold text-emerald-600">{monday.totals.done}</p>
-                  <p className="text-sm text-ink-600">{t('dashboard.monday.done')}</p>
-                </div>
-                <div>
-                  <p className="text-2xl font-extrabold text-ink-900">{monday.totals.total}</p>
-                  <p className="text-sm text-ink-600">{t('dashboard.monday.total')}</p>
-                </div>
-                <div>
-                  <p className="text-2xl font-extrabold text-brand-600">{monday.totals.imported_local}</p>
-                  <p className="text-sm text-ink-600">{t('dashboard.monday.imported')}</p>
-                </div>
-              </div>
-
-              {monday.by_board.length > 0 && (
-                <div className="space-y-3 border-t border-ink-100 px-6 pb-6 pt-4">
-                  <p className="text-xs font-bold uppercase tracking-wide text-ink-500">
-                    {t('dashboard.monday.byBoard')}
-                  </p>
-                  {monday.by_board.map((board) => (
-                    <div key={board.board_key}>
-                      <div className="flex items-center justify-between gap-4 text-sm">
-                        <span className="font-medium text-ink-700">{board.label}</span>
-                        <span className="shrink-0 text-ink-500">
-                          {board.open} {t('issues.monday.openItems')} · {board.done} Done · {board.total}{' '}
-                          total
-                        </span>
-                      </div>
-                      <div className="mt-1.5 flex h-2 w-full overflow-hidden rounded-full bg-ink-100">
-                        <div
-                          className={`h-full ${mondayBoardBarColor(board.board_key)}`}
-                          style={{
-                            width: `${Math.min(100, (board.open / Math.max(board.total, 1)) * 100)}%`,
-                          }}
-                        />
-                        <div
-                          className="h-full bg-emerald-300"
-                          style={{
-                            width: `${Math.min(100, (board.done / Math.max(board.total, 1)) * 100)}%`,
-                          }}
-                        />
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </Card>
+              <ExternalSourcePanel
+                source={source}
+                monday={data.monday}
+                jira={data.jira}
+                isFetching={isFetching}
+                onRefresh={() => void refetch()}
+              />
+            </div>
           )}
 
           <div className="grid gap-6 lg:grid-cols-2">
@@ -223,6 +344,11 @@ export function DashboardPage() {
                           {issue.source === 'monday' && (
                             <span className="shrink-0 rounded-full bg-violet-50 px-2 py-0.5 text-[10px] font-bold uppercase text-violet-700">
                               Monday
+                            </span>
+                          )}
+                          {issue.source === 'jira' && (
+                            <span className="shrink-0 rounded-full bg-sky-50 px-2 py-0.5 text-[10px] font-bold uppercase text-sky-700">
+                              Jira
                             </span>
                           )}
                         </div>
@@ -248,14 +374,17 @@ export function DashboardPage() {
                   data.by_system.map((item) => (
                     <div key={item.system_id}>
                       <div className="flex items-center justify-between text-sm">
-                        <span className="text-ink-700">{item.name}</span>
-                        <span className="font-semibold text-ink-900">{item.count}</span>
+                        <span className="font-medium text-ink-700">{item.name}</span>
+                        <span className="text-ink-500">{item.count}</span>
                       </div>
-                      <div className="mt-1 h-2 w-full overflow-hidden rounded-full bg-ink-100">
+                      <div className="mt-1.5 h-2 overflow-hidden rounded-full bg-ink-100">
                         <div
-                          className="h-full rounded-full bg-brand-500"
+                          className="h-full bg-brand-500"
                           style={{
-                            width: `${Math.min(100, (item.count / Math.max(data.totals.issues, 1)) * 100)}%`,
+                            width: `${Math.min(
+                              100,
+                              (item.count / Math.max(data.totals.issues, 1)) * 100,
+                            )}%`,
                           }}
                         />
                       </div>
