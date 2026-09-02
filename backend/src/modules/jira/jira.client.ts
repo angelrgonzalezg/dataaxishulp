@@ -1,6 +1,14 @@
 import { AppError } from '../../utils/AppError';
 import type { JiraSettings } from '../../config/jira';
 
+export interface JiraRawProject {
+  id: string;
+  key: string;
+  name: string;
+  projectTypeKey?: string | null;
+  style?: string | null;
+}
+
 export interface JiraRawIssue {
   id: string;
   key: string;
@@ -16,12 +24,18 @@ export interface JiraRawIssue {
     assignee?: { displayName?: string | null; emailAddress?: string | null } | null;
     issuetype?: { name?: string | null } | null;
     description?: unknown;
+    project?: {
+      id?: string | null;
+      key?: string | null;
+      name?: string | null;
+    } | null;
   };
 }
 
-interface JiraSearchResponse {
+interface JiraSearchJqlResponse {
   issues?: JiraRawIssue[];
-  total?: number;
+  nextPageToken?: string | null;
+  isLast?: boolean;
   errorMessages?: string[];
   errors?: Record<string, string>;
 }
@@ -53,13 +67,24 @@ async function jiraFetch<T>(
       const body = (await response.json()) as {
         errorMessages?: string[];
         message?: string;
+        error?: string;
       };
       const messages = body.errorMessages?.filter(Boolean) ?? [];
       if (messages.length > 0) detail = messages.join('; ');
       else if (body.message) detail = body.message;
+      else if (body.error) detail = body.error;
     } catch {
       // ignore parse errors
     }
+
+    if (response.status === 401 || response.status === 403) {
+      throw new AppError(
+        response.status,
+        `Jira authentication failed (${response.status}). Check JIRA_EMAIL + JIRA_API_TOKEN (must be an Atlassian API token for that email). ${detail}`,
+        'JIRA_AUTH_ERROR',
+      );
+    }
+
     throw new AppError(
       response.status >= 400 && response.status < 500 ? response.status : 502,
       detail,
@@ -70,23 +95,126 @@ async function jiraFetch<T>(
   return (await response.json()) as T;
 }
 
+/** Verifies Basic auth works for this site/token. */
+export async function assertJiraAuthenticated(settings: JiraSettings): Promise<{
+  accountId: string | null;
+  displayName: string | null;
+  emailAddress: string | null;
+}> {
+  try {
+    const me = await jiraFetch<{
+      accountId?: string;
+      displayName?: string;
+      emailAddress?: string;
+    }>(settings, '/rest/api/3/myself');
+    return {
+      accountId: me.accountId ?? null,
+      displayName: me.displayName ?? null,
+      emailAddress: me.emailAddress ?? null,
+    };
+  } catch (error) {
+    if (error instanceof AppError && error.code === 'JIRA_AUTH_ERROR') {
+      throw error;
+    }
+    throw new AppError(
+      401,
+      'Jira authentication failed on /myself. Recreate the API token at https://id.atlassian.com/manage-profile/security/api-tokens and ensure JIRA_EMAIL matches that Atlassian account.',
+      'JIRA_AUTH_ERROR',
+    );
+  }
+}
+
+/** All Jira projects/spaces visible to the configured account. */
+export async function listAccessibleProjects(
+  settings: JiraSettings,
+): Promise<JiraRawProject[]> {
+  const data = await jiraFetch<{ values?: JiraRawProject[]; total?: number } | JiraRawProject[]>(
+    settings,
+    '/rest/api/3/project/search?maxResults=100&status=live',
+  );
+  if (Array.isArray(data)) return data;
+  const values = data.values ?? [];
+  // If first page is full, keep paging.
+  if ((data.total ?? values.length) <= values.length) return values;
+
+  const all = [...values];
+  let startAt = values.length;
+  const total = data.total ?? values.length;
+  while (startAt < total && startAt < 500) {
+    const page = await jiraFetch<{ values?: JiraRawProject[] }>(
+      settings,
+      `/rest/api/3/project/search?maxResults=100&status=live&startAt=${startAt}`,
+    );
+    const batch = page.values ?? [];
+    if (batch.length === 0) break;
+    all.push(...batch);
+    startAt += batch.length;
+  }
+  return all;
+}
+
+async function searchJqlPage(
+  settings: JiraSettings,
+  jql: string,
+  maxResults: number,
+  nextPageToken?: string | null,
+): Promise<JiraSearchJqlResponse> {
+  const body: Record<string, unknown> = {
+    jql,
+    maxResults,
+    fields: ['summary', 'status', 'priority', 'assignee', 'updated', 'issuetype', 'project'],
+  };
+  if (nextPageToken) body.nextPageToken = nextPageToken;
+
+  return jiraFetch<JiraSearchJqlResponse>(settings, '/rest/api/3/search/jql', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+/** Paginated JQL search via /rest/api/3/search/jql (old /search is gone). */
+export async function searchIssuesPaginated(
+  settings: JiraSettings,
+  jql: string,
+): Promise<JiraRawIssue[]> {
+  const pageSize = settings.maxResults;
+  const hardCap = settings.maxTotalResults;
+  const all: JiraRawIssue[] = [];
+  let nextPageToken: string | null | undefined;
+
+  while (all.length < hardCap) {
+    const take = Math.min(pageSize, hardCap - all.length);
+    const page = await searchJqlPage(settings, jql, take, nextPageToken);
+    const issues = page.issues ?? [];
+    all.push(...issues);
+
+    if (page.isLast !== false && !page.nextPageToken) break;
+    if (!page.nextPageToken || issues.length === 0) break;
+    nextPageToken = page.nextPageToken;
+  }
+
+  return all;
+}
+
 export async function searchProjectIssues(
   settings: JiraSettings,
   projectKey: string,
 ): Promise<JiraRawIssue[]> {
-  const jql = `project = "${projectKey.replace(/"/g, '\\"')}" ORDER BY updated DESC`;
-  const params = new URLSearchParams({
-    jql,
-    maxResults: String(settings.maxResults),
-    fields: 'summary,status,priority,assignee,updated,issuetype',
-  });
+  const safeKey = projectKey.replace(/"/g, '\\"');
+  // Bounded JQL required by /search/jql
+  const jql = `project = "${safeKey}" AND updated >= -730d ORDER BY updated DESC`;
+  return searchIssuesPaginated(settings, jql);
+}
 
-  const data = await jiraFetch<JiraSearchResponse>(
+/** Issues across every accessible project/space. */
+export async function searchAllAccessibleIssues(
+  settings: JiraSettings,
+): Promise<JiraRawIssue[]> {
+  // /search/jql rejects unbounded queries; restrict by updated window.
+  return searchIssuesPaginated(
     settings,
-    `/rest/api/3/search?${params.toString()}`,
+    'updated >= -730d ORDER BY project ASC, updated DESC',
   );
-
-  return data.issues ?? [];
 }
 
 export async function fetchIssueByKey(
@@ -96,7 +224,7 @@ export async function fetchIssueByKey(
   try {
     return await jiraFetch<JiraRawIssue>(
       settings,
-      `/rest/api/3/issue/${encodeURIComponent(issueKey)}?fields=summary,status,priority,assignee,updated,issuetype,description`,
+      `/rest/api/3/issue/${encodeURIComponent(issueKey)}?fields=summary,status,priority,assignee,updated,issuetype,description,project`,
     );
   } catch (error) {
     if (error instanceof AppError && error.statusCode === 404) {

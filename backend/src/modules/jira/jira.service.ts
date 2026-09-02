@@ -1,19 +1,24 @@
 import { prisma } from '../../config/db';
 import type { JiraProjectDefinition, JiraSettings } from '../../config/jira';
 import {
-  getJiraProjectDefinition,
+  getJiraProjectOverride,
   getJiraSettings,
   jiraExternalRef,
   requireJiraSettings,
 } from '../../config/jira';
 import { AppError, NotFoundError, ValidationError } from '../../utils/AppError';
+import { daysSinceUpdate, isStaleIssue, STALE_ISSUE_DAYS } from '../../utils/staleIssue';
 import type { IssuePriority } from '../../types/database.types';
 import * as issuesService from '../issues/issues.service';
 import {
+  assertJiraAuthenticated,
   browseUrl,
   fetchIssueByKey,
+  listAccessibleProjects,
+  searchAllAccessibleIssues,
   searchProjectIssues,
   type JiraRawIssue,
+  type JiraRawProject,
 } from './jira.client';
 import type {
   JiraAllItemsResult,
@@ -87,6 +92,53 @@ function assertJiraConfigured(): JiraSettings {
   }
 }
 
+function toProjectDefinition(
+  settings: JiraSettings,
+  raw: Pick<JiraRawProject, 'key' | 'name'>,
+): JiraProjectDefinition {
+  const override = getJiraProjectOverride(settings, raw.key);
+  return {
+    key: override?.key ?? raw.key.toLowerCase(),
+    label: override?.label ?? raw.name,
+    projectKey: raw.key,
+    defaultSystemKey: override?.defaultSystemKey ?? settings.defaultSystemKey,
+  };
+}
+
+async function resolveProjects(
+  settings: JiraSettings,
+  projectKey?: string,
+): Promise<JiraProjectDefinition[]> {
+  if (!settings.discoverAllProjects) {
+    const projects = settings.projectOverrides;
+    if (!projectKey) return projects;
+    const match = getJiraProjectOverride(settings, projectKey);
+    if (!match) {
+      throw new NotFoundError(`Jira project "${projectKey}" is not configured`);
+    }
+    return [match];
+  }
+
+  const accessible = await listAccessibleProjects(settings);
+  const mapped = accessible
+    .filter((project) => Boolean(project.key?.trim()))
+    .map((project) => toProjectDefinition(settings, project))
+    .sort((a, b) => a.label.localeCompare(b.label));
+
+  if (!projectKey) return mapped;
+
+  const needle = projectKey.trim().toLowerCase();
+  const match = mapped.find(
+    (project) =>
+      project.key.toLowerCase() === needle ||
+      project.projectKey.toLowerCase() === needle,
+  );
+  if (!match) {
+    throw new NotFoundError(`Jira project/space "${projectKey}" was not found or is not accessible`);
+  }
+  return [match];
+}
+
 async function attachLocalIssueLinks(items: JiraItemDto[]): Promise<Record<string, number>> {
   const externalRefs = items.map((item) => jiraExternalRef(item.jira_issue_key));
   const existingIssues = externalRefs.length
@@ -105,18 +157,18 @@ async function attachLocalIssueLinks(items: JiraItemDto[]): Promise<Record<strin
   return localIssueByJiraKey;
 }
 
-async function listJiraProjectItems(
+function buildProjectResult(
   settings: JiraSettings,
   project: JiraProjectDefinition,
+  rawItems: JiraRawIssue[],
   includeDone: boolean,
-): Promise<JiraProjectItemsResult> {
-  const rawItems = await searchProjectIssues(settings, project.projectKey);
+  localLinks: Record<string, number>,
+): JiraProjectItemsResult {
   const mapped = rawItems.map((issue) => mapJiraItem(issue, settings, project.label));
   const openItems = mapped.filter((item) => !isDoneItem(item, settings.doneStatus));
   const doneItems = includeDone
     ? mapped.filter((item) => isDoneItem(item, settings.doneStatus))
     : [];
-  const linkSource = includeDone ? [...openItems, ...doneItems] : openItems;
 
   return {
     project_key: project.key,
@@ -131,7 +183,11 @@ async function listJiraProjectItems(
       done: doneItems.length,
       total: openItems.length + doneItems.length,
     },
-    local_issue_by_jira_key: await attachLocalIssueLinks(linkSource),
+    local_issue_by_jira_key: Object.fromEntries(
+      [...openItems, ...doneItems]
+        .map((item) => [item.jira_issue_key, localLinks[item.jira_issue_key]] as const)
+        .filter((entry): entry is [string, number] => entry[1] != null),
+    ),
   };
 }
 
@@ -141,19 +197,71 @@ export async function listJiraItems(
 ): Promise<JiraAllItemsResult> {
   const includeDone = options?.includeDone ?? false;
   const settings = assertJiraConfigured();
-  const projects = projectKey
-    ? (() => {
-        const project = getJiraProjectDefinition(settings, projectKey);
-        if (!project) {
-          throw new NotFoundError(`Jira project "${projectKey}" is not configured`);
-        }
-        return [project];
-      })()
-    : settings.projects;
+  await assertJiraAuthenticated(settings);
+  const projects = await resolveProjects(settings, projectKey);
 
-  const projectResults = await Promise.all(
-    projects.map((project) => listJiraProjectItems(settings, project, includeDone)),
-  );
+  let projectResults: JiraProjectItemsResult[];
+
+  if (settings.discoverAllProjects && !projectKey) {
+    const rawItems = await searchAllAccessibleIssues(settings);
+    const byJiraProjectKey = new Map<string, JiraRawIssue[]>();
+    for (const issue of rawItems) {
+      const key =
+        issue.fields.project?.key?.trim() ||
+        issue.key.split('-')[0] ||
+        'UNKNOWN';
+      const bucket = byJiraProjectKey.get(key) ?? [];
+      bucket.push(issue);
+      byJiraProjectKey.set(key, bucket);
+    }
+
+    const allMappedForLinks = rawItems.map((issue) => {
+      const jiraKey = issue.fields.project?.key?.trim() || issue.key.split('-')[0] || 'UNKNOWN';
+      const project =
+        projects.find((item) => item.projectKey === jiraKey) ??
+        toProjectDefinition(settings, {
+          key: jiraKey,
+          name: issue.fields.project?.name?.trim() || jiraKey,
+        });
+      return mapJiraItem(issue, settings, project.label);
+    });
+    const localLinks = await attachLocalIssueLinks(allMappedForLinks);
+
+    // Keep every accessible space, even if the recent issue page didn't include it.
+    projectResults = projects.map((project) =>
+      buildProjectResult(
+        settings,
+        project,
+        byJiraProjectKey.get(project.projectKey) ?? [],
+        includeDone,
+        localLinks,
+      ),
+    );
+
+    // Also surface any unexpected project keys present in the issue page.
+    for (const [jiraKey, issues] of byJiraProjectKey.entries()) {
+      if (projects.some((project) => project.projectKey === jiraKey)) continue;
+      const synthetic = toProjectDefinition(settings, {
+        key: jiraKey,
+        name: issues[0]?.fields.project?.name?.trim() || jiraKey,
+      });
+      projectResults.push(
+        buildProjectResult(settings, synthetic, issues, includeDone, localLinks),
+      );
+    }
+  } else {
+    const settled = await Promise.all(
+      projects.map(async (project) => {
+        const rawItems = await searchProjectIssues(settings, project.projectKey);
+        const mapped = rawItems.map((issue) => mapJiraItem(issue, settings, project.label));
+        const localLinks = await attachLocalIssueLinks(mapped);
+        return buildProjectResult(settings, project, rawItems, includeDone, localLinks);
+      }),
+    );
+    projectResults = settled;
+  }
+
+  projectResults.sort((a, b) => a.label.localeCompare(b.label));
 
   return {
     site: settings.baseUrl,
@@ -168,7 +276,8 @@ export async function importJiraItem(
   actorId: number,
 ): Promise<JiraImportResult> {
   const settings = assertJiraConfigured();
-  const project = getJiraProjectDefinition(settings, projectKey);
+  const projects = await resolveProjects(settings, projectKey);
+  const project = projects[0];
   if (!project) {
     throw new ValidationError(`Jira project "${projectKey}" is not configured`);
   }
@@ -246,44 +355,76 @@ export async function getJiraDashboardSummary(): Promise<JiraDashboardSummary | 
       }),
     ]);
 
-    const totals = jiraData.projects.reduce(
+    const now = new Date();
+    const by_project = jiraData.projects.map((project) => {
+      const openItems = project.open_items ?? project.items;
+      const stale_open = openItems.filter((item) => isStaleIssue(item.updated_at, now)).length;
+      return {
+        project_key: project.project_key,
+        jira_project_key: project.jira_project_key,
+        label: project.label,
+        open: project.counts.open,
+        done: project.counts.done,
+        total: project.counts.total,
+        stale_open,
+      };
+    });
+
+    const totals = by_project.reduce(
       (acc, project) => ({
-        open: acc.open + project.counts.open,
-        done: acc.done + project.counts.done,
-        total: acc.total + project.counts.total,
+        open: acc.open + project.open,
+        done: acc.done + project.done,
+        total: acc.total + project.total,
+        stale_open: acc.stale_open + project.stale_open,
       }),
-      { open: 0, done: 0, total: 0 },
+      { open: 0, done: 0, total: 0, stale_open: 0 },
     );
+
+    const stale_items = jiraData.projects
+      .flatMap((project) =>
+        (project.open_items ?? project.items)
+          .filter((item) => isStaleIssue(item.updated_at, now))
+          .map((item) => {
+            const days = daysSinceUpdate(item.updated_at, now) ?? STALE_ISSUE_DAYS;
+            return {
+              id: item.jira_issue_id,
+              key: item.jira_issue_key,
+              title: item.name,
+              project_key: project.project_key,
+              project_label: project.label,
+              updated_at: item.updated_at,
+              days_stale: days,
+              url: item.jira_url,
+            };
+          }),
+      )
+      .sort((a, b) => b.days_stale - a.days_stale)
+      .slice(0, 8);
 
     return {
       configured: true,
       site: jiraData.site,
       last_synced_at: jiraData.synced_at,
+      stale_threshold_days: STALE_ISSUE_DAYS,
       totals: {
         ...totals,
         imported_local: importedLocal,
       },
-      by_project: jiraData.projects.map((project) => ({
-        project_key: project.project_key,
-        label: project.label,
-        open: project.counts.open,
-        done: project.counts.done,
-        total: project.counts.total,
-      })),
+      by_project,
+      stale_items,
     };
-  } catch {
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : 'Jira sync failed';
     return {
       configured: true,
       site: settings.baseUrl,
       last_synced_at: null,
-      totals: { open: 0, done: 0, total: 0, imported_local: 0 },
-      by_project: settings.projects.map((project) => ({
-        project_key: project.key,
-        label: project.label,
-        open: 0,
-        done: 0,
-        total: 0,
-      })),
+      error: message,
+      stale_threshold_days: STALE_ISSUE_DAYS,
+      totals: { open: 0, done: 0, total: 0, imported_local: 0, stale_open: 0 },
+      by_project: [],
+      stale_items: [],
     };
   }
 }

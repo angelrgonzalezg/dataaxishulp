@@ -170,11 +170,13 @@ export interface MondayDashboardSummary {
   configured: boolean;
   workspace: string | null;
   last_synced_at: string | null;
+  stale_threshold_days?: number;
   totals: {
     open: number;
     done: number;
     total: number;
     imported_local: number;
+    stale_open?: number;
   };
   by_board: Array<{
     board_key: string;
@@ -182,6 +184,16 @@ export interface MondayDashboardSummary {
     open: number;
     done: number;
     total: number;
+    stale_open?: number;
+  }>;
+  stale_items?: Array<{
+    id: string;
+    title: string;
+    board_key: string;
+    board_label: string;
+    updated_at: string | null;
+    days_stale: number;
+    url: string | null;
   }>;
 }
 
@@ -235,18 +247,33 @@ export interface JiraDashboardSummary {
   configured: boolean;
   site: string | null;
   last_synced_at: string | null;
+  error?: string | null;
+  stale_threshold_days?: number;
   totals: {
     open: number;
     done: number;
     total: number;
     imported_local: number;
+    stale_open?: number;
   };
   by_project: Array<{
     project_key: string;
+    jira_project_key?: string;
     label: string;
     open: number;
     done: number;
     total: number;
+    stale_open?: number;
+  }>;
+  stale_items?: Array<{
+    id: string;
+    key: string;
+    title: string;
+    project_key: string;
+    project_label: string;
+    updated_at: string | null;
+    days_stale: number;
+    url: string | null;
   }>;
 }
 
@@ -886,6 +913,7 @@ export interface InzageSubjectReport {
 
 export interface DashboardOverview {
   generated_at: string;
+  stale_threshold_days?: number;
   totals: {
     issues: number;
     open: number;
@@ -893,6 +921,7 @@ export interface DashboardOverview {
     resolved: number;
     closed: number;
     critical_open: number;
+    stale_open?: number;
     systems: number;
   };
   monday: MondayDashboardSummary | null;
@@ -906,6 +935,17 @@ export interface DashboardOverview {
     system_name: string;
     assigned_to: string | null;
     updated_at: string;
+    source?: 'monday' | 'jira' | 'local';
+  }>;
+  stale_issues?: Array<{
+    issue_id: number;
+    title: string;
+    status: string;
+    priority: string;
+    system_name: string;
+    assigned_to: string | null;
+    updated_at: string;
+    days_stale: number;
     source?: 'monday' | 'jira' | 'local';
   }>;
 }

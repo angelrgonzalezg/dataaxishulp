@@ -7,6 +7,7 @@ import {
   requireMondaySettings,
 } from '../../config/monday';
 import { AppError, NotFoundError, ValidationError } from '../../utils/AppError';
+import { daysSinceUpdate, isStaleIssue, STALE_ISSUE_DAYS } from '../../utils/staleIssue';
 import type { IssuePriority } from '../../types/database.types';
 import * as issuesService from '../issues/issues.service';
 import {
@@ -333,44 +334,78 @@ export async function getMondayDashboardSummary(): Promise<MondayDashboardSummar
       }),
     ]);
 
-    const totals = mondayData.boards.reduce(
-      (acc, board) => ({
-        open: acc.open + board.counts.open,
-        done: acc.done + board.counts.done,
-        total: acc.total + board.counts.total,
-      }),
-      { open: 0, done: 0, total: 0 },
-    );
-
-    return {
-      configured: true,
-      workspace: mondayData.workspace,
-      last_synced_at: mondayData.synced_at,
-      totals: {
-        ...totals,
-        imported_local: importedLocal,
-      },
-      by_board: mondayData.boards.map((board) => ({
+    const now = new Date();
+    const by_board = mondayData.boards.map((board) => {
+      const openItems = board.open_items ?? board.items;
+      const stale_open = openItems.filter((item) => isStaleIssue(item.updated_at, now)).length;
+      return {
         board_key: board.board_key,
         label: board.label,
         open: board.counts.open,
         done: board.counts.done,
         total: board.counts.total,
-      })),
+        stale_open,
+      };
+    });
+
+    const totals = by_board.reduce(
+      (acc, board) => ({
+        open: acc.open + board.open,
+        done: acc.done + board.done,
+        total: acc.total + board.total,
+        stale_open: acc.stale_open + board.stale_open,
+      }),
+      { open: 0, done: 0, total: 0, stale_open: 0 },
+    );
+
+    const stale_items = mondayData.boards
+      .flatMap((board) =>
+        (board.open_items ?? board.items)
+          .filter((item) => isStaleIssue(item.updated_at, now))
+          .map((item) => {
+            const days = daysSinceUpdate(item.updated_at, now) ?? STALE_ISSUE_DAYS;
+            return {
+              id: item.monday_item_id,
+              title: item.name,
+              board_key: board.board_key,
+              board_label: board.label,
+              updated_at: item.updated_at,
+              days_stale: days,
+              url: item.monday_url,
+            };
+          }),
+      )
+      .sort((a, b) => b.days_stale - a.days_stale)
+      .slice(0, 8);
+
+    return {
+      configured: true,
+      workspace: mondayData.workspace,
+      last_synced_at: mondayData.synced_at,
+      stale_threshold_days: STALE_ISSUE_DAYS,
+      totals: {
+        ...totals,
+        imported_local: importedLocal,
+      },
+      by_board,
+      stale_items,
     };
   } catch {
     return {
       configured: true,
       workspace: settings.workspaceName,
       last_synced_at: null,
-      totals: { open: 0, done: 0, total: 0, imported_local: 0 },
+      stale_threshold_days: STALE_ISSUE_DAYS,
+      totals: { open: 0, done: 0, total: 0, imported_local: 0, stale_open: 0 },
       by_board: settings.boards.map((board) => ({
         board_key: board.key,
         label: board.label,
         open: 0,
         done: 0,
         total: 0,
+        stale_open: 0,
       })),
+      stale_items: [],
     };
   }
 }

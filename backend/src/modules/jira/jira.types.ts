@@ -32,18 +32,33 @@ export interface JiraDashboardSummary {
   configured: boolean;
   site: string | null;
   last_synced_at: string | null;
+  error?: string | null;
+  stale_threshold_days: number;
   totals: {
     open: number;
     done: number;
     total: number;
     imported_local: number;
+    stale_open: number;
   };
   by_project: Array<{
     project_key: string;
+    jira_project_key: string;
     label: string;
     open: number;
     done: number;
     total: number;
+    stale_open: number;
+  }>;
+  stale_items: Array<{
+    id: string;
+    key: string;
+    title: string;
+    project_key: string;
+    project_label: string;
+    updated_at: string | null;
+    days_stale: number;
+    url: string | null;
   }>;
 }
 

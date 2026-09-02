@@ -23,6 +23,7 @@ import type {
   MondayItem,
 } from '@/types';
 import { mondayBoardTheme } from '@/lib/mondayBoardThemes';
+import { daysSinceUpdate, isStaleIssue } from '@/lib/staleIssue';
 
 const STATUSES: IssueStatus[] = ['open', 'in_progress', 'resolved', 'closed'];
 const PRIORITIES: IssuePriority[] = ['low', 'medium', 'high', 'critical'];
@@ -43,8 +44,23 @@ function priorityClass(priority: IssuePriority): string {
   }
 }
 
+function LimboBadge({ updatedAt }: { updatedAt: string | Date | null | undefined }) {
+  const { t } = useTranslation();
+  if (!isStaleIssue(updatedAt)) return null;
+  const days = daysSinceUpdate(updatedAt) ?? 0;
+  return (
+    <span
+      title={t('issues.limboBadgeTitle', { days })}
+      className="shrink-0 rounded-full bg-orange-100 px-2 py-0.5 text-[10px] font-bold uppercase text-orange-800"
+    >
+      {t('issues.limboBadge', { days })}
+    </span>
+  );
+}
+
 function IssueRow({ issue, index }: { issue: Issue; index: number }) {
   const { t } = useTranslation();
+  const showLimbo = issue.status === 'open' || issue.status === 'in_progress';
 
   return (
     <motion.div
@@ -57,7 +73,10 @@ function IssueRow({ issue, index }: { issue: Issue; index: number }) {
         className="flex items-center gap-4 border-b border-ink-100 px-6 py-4 last:border-0 hover:bg-ink-50/60"
       >
         <div className="min-w-0 flex-1">
-          <p className="truncate font-semibold text-ink-900">{issue.title}</p>
+          <div className="flex items-center gap-2">
+            <p className="truncate font-semibold text-ink-900">{issue.title}</p>
+            {showLimbo && <LimboBadge updatedAt={issue.updated_at} />}
+          </div>
           <p className="truncate text-sm text-ink-500">
             {issue.system.name}
             {issue.external_ref ? ` · ${issue.external_ref}` : ''}
@@ -107,6 +126,7 @@ function MondayItemRow({
           <p className={`truncate font-semibold ${isDone ? 'text-ink-600' : 'text-ink-900'}`}>
             {item.name}
           </p>
+          {!isDone && <LimboBadge updatedAt={item.updated_at} />}
           {isDone && (
             <span className="shrink-0 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold uppercase text-emerald-800">
               Done
@@ -301,6 +321,7 @@ function JiraItemRow({
           <p className={`truncate font-semibold ${isDone ? 'text-ink-600' : 'text-ink-900'}`}>
             {item.name}
           </p>
+          {!isDone && <LimboBadge updatedAt={item.updated_at} />}
           {isDone && (
             <span className="shrink-0 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold uppercase text-emerald-800">
               Done
@@ -345,9 +366,21 @@ function JiraItemRow({
   );
 }
 
+function matchesJiraItemQuery(query: string, item: JiraItem): boolean {
+  const q = query.trim().toLowerCase();
+  if (!q) return true;
+  return (
+    item.jira_issue_key.toLowerCase().includes(q) ||
+    item.name.toLowerCase().includes(q) ||
+    (item.status ?? '').toLowerCase().includes(q) ||
+    (item.assignee ?? '').toLowerCase().includes(q)
+  );
+}
+
 function JiraProjectSection({
   project,
   statusFilter,
+  issueQuery,
   onImport,
   onRefresh,
   refreshing,
@@ -355,6 +388,7 @@ function JiraProjectSection({
 }: {
   project: JiraProjectItemsResult;
   statusFilter: ExternalStatusFilter;
+  issueQuery: string;
   onImport: (item: JiraItem, projectKey: string) => void;
   onRefresh: (projectKey: string) => void;
   refreshing: boolean;
@@ -362,9 +396,13 @@ function JiraProjectSection({
 }) {
   const { t } = useTranslation();
   const theme = mondayBoardTheme(project.project_key);
-  const openItems = project.open_items ?? project.items;
-  const doneItems = project.done_items ?? [];
-  const counts = project.counts ?? {
+  const openItems = (project.open_items ?? project.items).filter((item) =>
+    matchesJiraItemQuery(issueQuery, item),
+  );
+  const doneItems = (project.done_items ?? []).filter((item) =>
+    matchesJiraItemQuery(issueQuery, item),
+  );
+  const counts = {
     open: openItems.length,
     done: doneItems.length,
     total: openItems.length + doneItems.length,
@@ -403,18 +441,20 @@ function JiraProjectSection({
 
       {visibleCount === 0 ? (
         <p className="p-6 text-sm text-ink-500">
-          {statusFilter === 'open'
-            ? t('issues.jira.noOpenItems')
-            : statusFilter === 'done'
-              ? t('issues.jira.noDoneItems')
-              : t('issues.jira.emptyProject')}
+          {issueQuery.trim()
+            ? t('issues.jira.filterEmpty')
+            : statusFilter === 'open'
+              ? t('issues.jira.noOpenItems')
+              : statusFilter === 'done'
+                ? t('issues.jira.noDoneItems')
+                : t('issues.jira.emptyProject')}
         </p>
       ) : (
         <>
           {showOpen &&
             (openItems.length === 0 ? (
               <p className="border-b border-ink-100 px-6 py-4 text-sm text-ink-500">
-                {t('issues.jira.noOpenItems')}
+                {issueQuery.trim() ? t('issues.jira.filterEmpty') : t('issues.jira.noOpenItems')}
               </p>
             ) : (
               openItems.map((item, index) => (
@@ -462,7 +502,7 @@ function JiraProjectSection({
 export function IssuesListPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const initialTab =
     searchParams.get('tab') === 'monday'
       ? 'monday'
@@ -477,7 +517,26 @@ export function IssuesListPage() {
   const [refreshingBoardKey, setRefreshingBoardKey] = useState<string | null>(null);
   const [refreshingProjectKey, setRefreshingProjectKey] = useState<string | null>(null);
   const [externalStatusFilter, setExternalStatusFilter] = useState<ExternalStatusFilter>('all');
+  const [jiraProjectFilter, setJiraProjectFilter] = useState(
+    () => searchParams.get('project') ?? '',
+  );
+  const [jiraIssueQuery, setJiraIssueQuery] = useState(() => searchParams.get('q') ?? '');
   const { data: systemsData } = useSystems();
+
+  function syncJiraUrl(nextTab: IssuesTab, project: string, query: string) {
+    const params = new URLSearchParams();
+    if (nextTab !== 'local') params.set('tab', nextTab);
+    if (nextTab === 'jira') {
+      if (project) params.set('project', project);
+      if (query.trim()) params.set('q', query.trim());
+    }
+    setSearchParams(params, { replace: true });
+  }
+
+  function switchTab(next: IssuesTab) {
+    setTab(next);
+    syncJiraUrl(next, jiraProjectFilter, jiraIssueQuery);
+  }
 
   const params = useMemo(
     () => ({
@@ -495,6 +554,24 @@ export function IssuesListPage() {
   const importMondayMutation = useImportMondayItem();
   const importJiraMutation = useImportJiraItem();
   const issues = data?.issues ?? [];
+
+  const filteredJiraProjects = useMemo(() => {
+    const projects = jiraInbox.data?.projects ?? [];
+    return projects.filter((project) => {
+      if (jiraProjectFilter && project.project_key !== jiraProjectFilter) return false;
+      if (!jiraIssueQuery.trim()) return true;
+      const q = jiraIssueQuery.trim().toLowerCase();
+      const prefix = q.includes('-') ? q.split('-')[0] : q;
+      const projectMatches =
+        project.project_key.toLowerCase() === prefix ||
+        project.jira_project_key.toLowerCase() === prefix ||
+        project.label.toLowerCase().includes(q);
+      const hasMatchingItem =
+        (project.open_items ?? project.items).some((item) => matchesJiraItemQuery(q, item)) ||
+        (project.done_items ?? []).some((item) => matchesJiraItemQuery(q, item));
+      return projectMatches || hasMatchingItem;
+    });
+  }, [jiraInbox.data?.projects, jiraProjectFilter, jiraIssueQuery]);
 
   async function handleImportMonday(item: MondayItem, boardKey: string) {
     const result = await importMondayMutation.mutateAsync({
@@ -535,7 +612,7 @@ export function IssuesListPage() {
       <div className="mb-4 flex flex-wrap gap-2">
         <button
           type="button"
-          onClick={() => setTab('local')}
+          onClick={() => switchTab('local')}
           className={`rounded-xl px-4 py-2 text-sm font-semibold ${
             tab === 'local' ? 'bg-brand-600 text-white' : 'bg-ink-100 text-ink-700 hover:bg-ink-200'
           }`}
@@ -544,7 +621,7 @@ export function IssuesListPage() {
         </button>
         <button
           type="button"
-          onClick={() => setTab('monday')}
+          onClick={() => switchTab('monday')}
           className={`rounded-xl px-4 py-2 text-sm font-semibold ${
             tab === 'monday' ? 'bg-brand-600 text-white' : 'bg-ink-100 text-ink-700 hover:bg-ink-200'
           }`}
@@ -553,7 +630,7 @@ export function IssuesListPage() {
         </button>
         <button
           type="button"
-          onClick={() => setTab('jira')}
+          onClick={() => switchTab('jira')}
           className={`rounded-xl px-4 py-2 text-sm font-semibold ${
             tab === 'jira' ? 'bg-brand-600 text-white' : 'bg-ink-100 text-ink-700 hover:bg-ink-200'
           }`}
@@ -715,6 +792,34 @@ export function IssuesListPage() {
             </div>
             <div className="flex shrink-0 flex-wrap items-center gap-2">
               <Select
+                value={jiraProjectFilter}
+                onChange={(e) => {
+                  const value = e.target.value;
+                  setJiraProjectFilter(value);
+                  syncJiraUrl('jira', value, jiraIssueQuery);
+                }}
+                className="w-48"
+              >
+                <option value="">{t('issues.jira.filterAllProjects')}</option>
+                {(jiraInbox.data?.projects ?? []).map((project) => (
+                  <option key={project.project_key} value={project.project_key}>
+                    {project.label} ({project.jira_project_key})
+                  </option>
+                ))}
+              </Select>
+              <div className="w-48">
+                <Input
+                  value={jiraIssueQuery}
+                  onChange={(e) => {
+                    const value = e.target.value;
+                    setJiraIssueQuery(value);
+                    syncJiraUrl('jira', jiraProjectFilter, value);
+                  }}
+                  placeholder={t('issues.jira.filterIssuePlaceholder')}
+                  icon={<Search style={{ width: 16, height: 16 }} />}
+                />
+              </div>
+              <Select
                 value={externalStatusFilter}
                 onChange={(e) => setExternalStatusFilter(e.target.value as ExternalStatusFilter)}
                 className="w-40"
@@ -750,11 +855,19 @@ export function IssuesListPage() {
               <Card className="p-6 text-sm text-ink-500">{t('issues.jira.empty')}</Card>
             )}
 
-          {(jiraInbox.data?.projects ?? []).map((project) => (
+          {!jiraInbox.isLoading &&
+            !jiraInbox.isError &&
+            (jiraInbox.data?.projects.length ?? 0) > 0 &&
+            filteredJiraProjects.length === 0 && (
+              <Card className="p-6 text-sm text-ink-500">{t('issues.jira.filterEmpty')}</Card>
+            )}
+
+          {filteredJiraProjects.map((project) => (
             <JiraProjectSection
               key={project.project_key}
               project={project}
               statusFilter={externalStatusFilter}
+              issueQuery={jiraIssueQuery}
               onImport={handleImportJira}
               onRefresh={handleRefreshProject}
               refreshing={refreshingProjectKey === project.project_key}
