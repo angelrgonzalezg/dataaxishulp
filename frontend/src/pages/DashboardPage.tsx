@@ -78,8 +78,10 @@ function ExternalSourcePanel({
   onRefresh,
   projectFilter,
   issueQuery,
+  assigneeFilter,
   onProjectFilterChange,
   onIssueQueryChange,
+  onAssigneeFilterChange,
 }: {
   source: IssueSource;
   monday: MondayDashboardSummary | null | undefined;
@@ -88,8 +90,10 @@ function ExternalSourcePanel({
   onRefresh: () => void;
   projectFilter: string;
   issueQuery: string;
+  assigneeFilter: string;
   onProjectFilterChange: (value: string) => void;
   onIssueQueryChange: (value: string) => void;
+  onAssigneeFilterChange: (value: string) => void;
 }) {
   const { t } = useTranslation();
   const isMonday = source === 'monday';
@@ -111,6 +115,9 @@ function ExternalSourcePanel({
       </Card>
     );
   }
+
+  const assignees = isMonday ? (monday?.assignees ?? []) : (jira?.assignees ?? []);
+  const staleItems = (isMonday ? monday?.stale_items : jira?.stale_items) ?? [];
 
   const allRows = isMonday
     ? (monday?.by_board ?? []).map((board) => ({
@@ -148,6 +155,25 @@ function ExternalSourcePanel({
     return true;
   });
 
+  const filteredStaleForAssignee = staleItems.filter((item) => {
+    if (projectFilter) {
+      const groupKey =
+        'board_key' in item && typeof item.board_key === 'string'
+          ? item.board_key
+          : 'project_key' in item
+            ? item.project_key
+            : '';
+      if (groupKey !== projectFilter) return false;
+    }
+    if (!assigneeFilter) return true;
+    if (assigneeFilter === '__unassigned__') return !item.assignee?.trim();
+    const people = (item.assignee ?? '')
+      .split(',')
+      .map((part) => part.trim())
+      .filter(Boolean);
+    return people.includes(assigneeFilter);
+  });
+
   const filteredTotals = rows.reduce(
     (acc, row) => ({
       open: acc.open + row.open,
@@ -157,6 +183,9 @@ function ExternalSourcePanel({
     }),
     { open: 0, done: 0, total: 0, stale_open: 0 },
   );
+  if (assigneeFilter) {
+    filteredTotals.stale_open = filteredStaleForAssignee.length;
+  }
 
   const subtitleBits = [
     isMonday ? t('dashboard.monday.subtitle') : t('dashboard.jira.subtitle'),
@@ -166,10 +195,10 @@ function ExternalSourcePanel({
   const issueKeyLookup = issueQuery.trim().toUpperCase();
   const looksLikeIssueKey = /^[A-Z][A-Z0-9]+-\d+$/i.test(issueKeyLookup);
   const inboxLink = isMonday
-    ? '/issues?tab=monday'
+    ? `/issues?tab=monday${assigneeFilter ? `&assignee=${encodeURIComponent(assigneeFilter)}` : ''}`
     : `/issues?tab=jira${projectFilter ? `&project=${encodeURIComponent(projectFilter)}` : ''}${
         issueQuery.trim() ? `&q=${encodeURIComponent(issueQuery.trim())}` : ''
-      }`;
+      }${assigneeFilter ? `&assignee=${encodeURIComponent(assigneeFilter)}` : ''}`;
 
   return (
     <Card>
@@ -203,7 +232,7 @@ function ExternalSourcePanel({
         </div>
       </div>
 
-      <div className="grid gap-3 border-b border-ink-100 px-6 py-4 sm:grid-cols-2">
+      <div className="grid gap-3 border-b border-ink-100 px-6 py-4 sm:grid-cols-3">
         <div>
           <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-ink-500">
             {isMonday ? t('dashboard.filterBoard') : t('dashboard.filterProject')}
@@ -217,6 +246,23 @@ function ExternalSourcePanel({
               <option key={row.key} value={row.key}>
                 {row.label}
                 {row.jira_project_key ? ` (${row.jira_project_key.toUpperCase()})` : ''}
+              </option>
+            ))}
+          </Select>
+        </div>
+        <div>
+          <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-ink-500">
+            {t('dashboard.filterPerson')}
+          </label>
+          <Select
+            value={assigneeFilter}
+            onChange={(event) => onAssigneeFilterChange(event.target.value)}
+          >
+            <option value="">{t('dashboard.filterAllPeople')}</option>
+            <option value="__unassigned__">{t('dashboard.filterUnassigned')}</option>
+            {assignees.map((person) => (
+              <option key={person} value={person}>
+                {person}
               </option>
             ))}
           </Select>
@@ -328,6 +374,7 @@ export function DashboardPage() {
   });
   const [projectFilter, setProjectFilter] = useState('');
   const [issueQuery, setIssueQuery] = useState('');
+  const [assigneeFilter, setAssigneeFilter] = useState('');
 
   useEffect(() => {
     localStorage.setItem(DASHBOARD_SOURCE_KEY, source);
@@ -336,6 +383,7 @@ export function DashboardPage() {
   useEffect(() => {
     setProjectFilter('');
     setIssueQuery('');
+    setAssigneeFilter('');
   }, [source]);
 
   const availableSources = useMemo(() => {
@@ -420,36 +468,49 @@ export function DashboardPage() {
   }, [data, source, projectFilter, issueQuery, t]);
 
   const staleThreshold = data?.stale_threshold_days ?? STALE_ISSUE_DAYS;
-  const limboCount = externalStats
-    ? externalStats.stale
-    : (data?.totals.stale_open ?? 0);
-  const limboInboxLink =
-    source === 'jira' ? '/issues?tab=jira' : source === 'monday' ? '/issues?tab=monday' : '/issues';
+
+  function matchesPerson(assignee: string | null | undefined, filter: string): boolean {
+    if (!filter) return true;
+    if (filter === '__unassigned__') return !assignee?.trim();
+    const people = (assignee ?? '')
+      .split(',')
+      .map((part) => part.trim())
+      .filter(Boolean);
+    return people.includes(filter);
+  }
 
   const limboPreview = useMemo(() => {
     if (!data) return [];
     if (source === 'jira') {
       return (data.jira?.stale_items ?? [])
         .filter((item) => !projectFilter || item.project_key === projectFilter)
+        .filter((item) => matchesPerson(item.assignee, assigneeFilter))
+        .slice(0, 12)
         .map((item) => ({
           id: item.id,
           title: item.key ? `${item.key} · ${item.title}` : item.title,
-          meta: item.project_label,
+          meta: [item.project_label, item.assignee].filter(Boolean).join(' · '),
           days: item.days_stale,
           href: item.url,
-          localHref: `/issues?tab=jira&project=${encodeURIComponent(item.project_key)}&q=${encodeURIComponent(item.key)}`,
+          localHref: `/issues?tab=jira&project=${encodeURIComponent(item.project_key)}&q=${encodeURIComponent(item.key)}${
+            item.assignee ? `&assignee=${encodeURIComponent(item.assignee)}` : ''
+          }`,
         }));
     }
     if (source === 'monday') {
       return (data.monday?.stale_items ?? [])
         .filter((item) => !projectFilter || item.board_key === projectFilter)
+        .filter((item) => matchesPerson(item.assignee, assigneeFilter))
+        .slice(0, 12)
         .map((item) => ({
           id: item.id,
           title: item.title,
-          meta: item.board_label,
+          meta: [item.board_label, item.assignee].filter(Boolean).join(' · '),
           days: item.days_stale,
           href: item.url,
-          localHref: '/issues?tab=monday',
+          localHref: `/issues?tab=monday&q=${encodeURIComponent(item.title)}${
+            item.assignee ? `&assignee=${encodeURIComponent(item.assignee.split(',')[0].trim())}` : ''
+          }`,
         }));
     }
     return (data.stale_issues ?? []).map((item) => ({
@@ -460,7 +521,34 @@ export function DashboardPage() {
       href: null as string | null,
       localHref: `/issues/${item.issue_id}`,
     }));
-  }, [data, source, projectFilter]);
+  }, [data, source, projectFilter, assigneeFilter]);
+
+  const limboCount = useMemo(() => {
+    if (source === 'jira') {
+      return (data?.jira?.stale_items ?? []).filter(
+        (item) =>
+          (!projectFilter || item.project_key === projectFilter) &&
+          matchesPerson(item.assignee, assigneeFilter),
+      ).length;
+    }
+    if (source === 'monday') {
+      return (data?.monday?.stale_items ?? []).filter(
+        (item) =>
+          (!projectFilter || item.board_key === projectFilter) &&
+          matchesPerson(item.assignee, assigneeFilter),
+      ).length;
+    }
+    return data?.totals.stale_open ?? 0;
+  }, [data, source, projectFilter, assigneeFilter]);
+
+  const limboInboxLink =
+    source === 'jira'
+      ? `/issues?tab=jira${projectFilter ? `&project=${encodeURIComponent(projectFilter)}` : ''}${
+          assigneeFilter ? `&assignee=${encodeURIComponent(assigneeFilter)}` : ''
+        }`
+      : source === 'monday'
+        ? `/issues?tab=monday${assigneeFilter ? `&assignee=${encodeURIComponent(assigneeFilter)}` : ''}`
+        : '/issues';
 
   return (
     <div className="mx-auto max-w-6xl space-y-6">
@@ -538,9 +626,9 @@ export function DashboardPage() {
                 <StatCard
                   icon={<Hourglass style={{ width: 22, height: 22 }} />}
                   label={t('dashboard.limbo')}
-                  value={String(externalStats.stale)}
+                  value={String(limboCount)}
                   accent={
-                    externalStats.stale > 0
+                    limboCount > 0
                       ? 'bg-orange-50 text-orange-600'
                       : 'bg-ink-50 text-ink-500'
                   }
@@ -648,12 +736,23 @@ export function DashboardPage() {
                       className="flex items-center justify-between gap-4 px-6 py-3"
                     >
                       <div className="min-w-0">
-                        <Link
-                          to={item.localHref}
-                          className="block truncate font-semibold text-ink-900 hover:text-brand-700"
-                        >
-                          {item.title}
-                        </Link>
+                        {item.href ? (
+                          <a
+                            href={item.href}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="block truncate font-semibold text-ink-900 hover:text-brand-700"
+                          >
+                            {item.title}
+                          </a>
+                        ) : (
+                          <Link
+                            to={item.localHref}
+                            className="block truncate font-semibold text-ink-900 hover:text-brand-700"
+                          >
+                            {item.title}
+                          </Link>
+                        )}
                         <p className="truncate text-xs text-ink-500">{item.meta}</p>
                       </div>
                       <div className="flex shrink-0 items-center gap-2">
@@ -665,11 +764,19 @@ export function DashboardPage() {
                             href={item.href}
                             target="_blank"
                             rel="noreferrer"
-                            className="text-xs font-semibold text-brand-700 hover:underline"
+                            title={t('dashboard.openExternalDetail')}
+                            className="inline-flex items-center gap-1 rounded-lg bg-white px-2 py-1 text-xs font-semibold text-brand-700 hover:bg-brand-50"
                           >
                             <ExternalLink style={{ width: 14, height: 14 }} />
+                            {source === 'jira' ? 'Jira' : source === 'monday' ? 'Monday' : ''}
                           </a>
                         )}
+                        <Link
+                          to={item.localHref}
+                          className="text-xs font-semibold text-ink-600 hover:text-brand-700 hover:underline"
+                        >
+                          {t('dashboard.limboViewInbox')}
+                        </Link>
                       </div>
                     </div>
                   ))}
@@ -687,8 +794,10 @@ export function DashboardPage() {
               onRefresh={() => void refetch()}
               projectFilter={projectFilter}
               issueQuery={issueQuery}
+              assigneeFilter={assigneeFilter}
               onProjectFilterChange={setProjectFilter}
               onIssueQueryChange={setIssueQuery}
+              onAssigneeFilterChange={setAssigneeFilter}
             />
           )}
 

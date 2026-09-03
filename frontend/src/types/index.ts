@@ -191,10 +191,12 @@ export interface MondayDashboardSummary {
     title: string;
     board_key: string;
     board_label: string;
+    assignee?: string | null;
     updated_at: string | null;
     days_stale: number;
     url: string | null;
   }>;
+  assignees?: string[];
 }
 
 export interface MondayAllItemsResult {
@@ -271,10 +273,12 @@ export interface JiraDashboardSummary {
     title: string;
     project_key: string;
     project_label: string;
+    assignee?: string | null;
     updated_at: string | null;
     days_stale: number;
     url: string | null;
   }>;
+  assignees?: string[];
 }
 
 export interface JiraAllItemsResult {

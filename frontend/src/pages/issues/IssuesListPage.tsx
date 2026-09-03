@@ -23,7 +23,7 @@ import type {
   MondayItem,
 } from '@/types';
 import { mondayBoardTheme } from '@/lib/mondayBoardThemes';
-import { daysSinceUpdate, isStaleIssue } from '@/lib/staleIssue';
+import { daysSinceUpdate, isExcludedFromLimbo, isLimboIssue } from '@/lib/staleIssue';
 
 const STATUSES: IssueStatus[] = ['open', 'in_progress', 'resolved', 'closed'];
 const PRIORITIES: IssuePriority[] = ['low', 'medium', 'high', 'critical'];
@@ -44,9 +44,25 @@ function priorityClass(priority: IssuePriority): string {
   }
 }
 
-function LimboBadge({ updatedAt }: { updatedAt: string | Date | null | undefined }) {
+function matchesAssigneeFilter(assignee: string | null | undefined, filter: string): boolean {
+  if (!filter) return true;
+  if (filter === '__unassigned__') return !assignee?.trim();
+  const people = (assignee ?? '')
+    .split(',')
+    .map((part) => part.trim())
+    .filter(Boolean);
+  return people.includes(filter);
+}
+
+function LimboBadge({
+  updatedAt,
+  status,
+}: {
+  updatedAt: string | Date | null | undefined;
+  status?: string | null;
+}) {
   const { t } = useTranslation();
-  if (!isStaleIssue(updatedAt)) return null;
+  if (!isLimboIssue(updatedAt, status)) return null;
   const days = daysSinceUpdate(updatedAt) ?? 0;
   return (
     <span
@@ -75,7 +91,7 @@ function IssueRow({ issue, index }: { issue: Issue; index: number }) {
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
             <p className="truncate font-semibold text-ink-900">{issue.title}</p>
-            {showLimbo && <LimboBadge updatedAt={issue.updated_at} />}
+            {showLimbo && <LimboBadge updatedAt={issue.updated_at} status={issue.status} />}
           </div>
           <p className="truncate text-sm text-ink-500">
             {issue.system.name}
@@ -126,7 +142,7 @@ function MondayItemRow({
           <p className={`truncate font-semibold ${isDone ? 'text-ink-600' : 'text-ink-900'}`}>
             {item.name}
           </p>
-          {!isDone && <LimboBadge updatedAt={item.updated_at} />}
+          {!isDone && <LimboBadge updatedAt={item.updated_at} status={item.status} />}
           {isDone && (
             <span className="shrink-0 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold uppercase text-emerald-800">
               Done
@@ -174,6 +190,8 @@ function MondayItemRow({
 function MondayBoardSection({
   board,
   statusFilter,
+  assigneeFilter,
+  issueQuery,
   onImport,
   onRefresh,
   refreshing,
@@ -181,6 +199,8 @@ function MondayBoardSection({
 }: {
   board: MondayBoardItemsResult;
   statusFilter: ExternalStatusFilter;
+  assigneeFilter: string;
+  issueQuery: string;
   onImport: (item: MondayItem, boardKey: string) => void;
   onRefresh: (boardKey: string) => void;
   refreshing: boolean;
@@ -188,9 +208,25 @@ function MondayBoardSection({
 }) {
   const { t } = useTranslation();
   const theme = mondayBoardTheme(board.board_key);
-  const openItems = board.open_items ?? board.items;
-  const doneItems = board.done_items ?? [];
-  const counts = board.counts ?? {
+  const rawOpen = board.open_items ?? board.items;
+  const rawDone = board.done_items ?? [];
+  const matchesItem = (item: MondayItem) => {
+    if (!matchesAssigneeFilter(item.assignee, assigneeFilter)) return false;
+    const q = issueQuery.trim().toLowerCase();
+    if (!q) return true;
+    return (
+      item.name.toLowerCase().includes(q) ||
+      (item.status ?? '').toLowerCase().includes(q) ||
+      (item.assignee ?? '').toLowerCase().includes(q) ||
+      item.monday_item_id.toLowerCase().includes(q)
+    );
+  };
+  const openItems = rawOpen.filter((item) => !isExcludedFromLimbo(item.status)).filter(matchesItem);
+  const doneItems = [
+    ...rawDone,
+    ...rawOpen.filter((item) => isExcludedFromLimbo(item.status)),
+  ].filter(matchesItem);
+  const counts = {
     open: openItems.length,
     done: doneItems.length,
     total: openItems.length + doneItems.length,
@@ -321,7 +357,7 @@ function JiraItemRow({
           <p className={`truncate font-semibold ${isDone ? 'text-ink-600' : 'text-ink-900'}`}>
             {item.name}
           </p>
-          {!isDone && <LimboBadge updatedAt={item.updated_at} />}
+          {!isDone && <LimboBadge updatedAt={item.updated_at} status={item.status} />}
           {isDone && (
             <span className="shrink-0 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold uppercase text-emerald-800">
               Done
@@ -381,6 +417,7 @@ function JiraProjectSection({
   project,
   statusFilter,
   issueQuery,
+  assigneeFilter,
   onImport,
   onRefresh,
   refreshing,
@@ -389,6 +426,7 @@ function JiraProjectSection({
   project: JiraProjectItemsResult;
   statusFilter: ExternalStatusFilter;
   issueQuery: string;
+  assigneeFilter: string;
   onImport: (item: JiraItem, projectKey: string) => void;
   onRefresh: (projectKey: string) => void;
   refreshing: boolean;
@@ -396,12 +434,15 @@ function JiraProjectSection({
 }) {
   const { t } = useTranslation();
   const theme = mondayBoardTheme(project.project_key);
-  const openItems = (project.open_items ?? project.items).filter((item) =>
-    matchesJiraItemQuery(issueQuery, item),
-  );
-  const doneItems = (project.done_items ?? []).filter((item) =>
-    matchesJiraItemQuery(issueQuery, item),
-  );
+  const rawOpen = project.open_items ?? project.items;
+  const rawDone = project.done_items ?? [];
+  const matchesItem = (item: JiraItem) =>
+    matchesAssigneeFilter(item.assignee, assigneeFilter) && matchesJiraItemQuery(issueQuery, item);
+  const openItems = rawOpen.filter((item) => !isExcludedFromLimbo(item.status)).filter(matchesItem);
+  const doneItems = [
+    ...rawDone,
+    ...rawOpen.filter((item) => isExcludedFromLimbo(item.status)),
+  ].filter(matchesItem);
   const counts = {
     open: openItems.length,
     done: doneItems.length,
@@ -521,21 +562,34 @@ export function IssuesListPage() {
     () => searchParams.get('project') ?? '',
   );
   const [jiraIssueQuery, setJiraIssueQuery] = useState(() => searchParams.get('q') ?? '');
+  const [mondayIssueQuery, setMondayIssueQuery] = useState(() =>
+    searchParams.get('tab') === 'monday' ? (searchParams.get('q') ?? '') : '',
+  );
+  const [assigneeFilter, setAssigneeFilter] = useState(() => searchParams.get('assignee') ?? '');
   const { data: systemsData } = useSystems();
 
-  function syncJiraUrl(nextTab: IssuesTab, project: string, query: string) {
+  function syncExternalUrl(
+    nextTab: IssuesTab,
+    options?: { project?: string; query?: string; assignee?: string },
+  ) {
     const params = new URLSearchParams();
     if (nextTab !== 'local') params.set('tab', nextTab);
-    if (nextTab === 'jira') {
-      if (project) params.set('project', project);
-      if (query.trim()) params.set('q', query.trim());
+    const project = options?.project ?? jiraProjectFilter;
+    const query = options?.query ?? (nextTab === 'monday' ? mondayIssueQuery : jiraIssueQuery);
+    const assignee = options?.assignee ?? assigneeFilter;
+    if (nextTab === 'jira' && project) params.set('project', project);
+    if ((nextTab === 'jira' || nextTab === 'monday') && query.trim()) {
+      params.set('q', query.trim());
+    }
+    if ((nextTab === 'jira' || nextTab === 'monday') && assignee) {
+      params.set('assignee', assignee);
     }
     setSearchParams(params, { replace: true });
   }
 
   function switchTab(next: IssuesTab) {
     setTab(next);
-    syncJiraUrl(next, jiraProjectFilter, jiraIssueQuery);
+    syncExternalUrl(next);
   }
 
   const params = useMemo(
@@ -555,10 +609,58 @@ export function IssuesListPage() {
   const importJiraMutation = useImportJiraItem();
   const issues = data?.issues ?? [];
 
+  const mondayAssignees = useMemo(() => {
+    const names = new Set<string>();
+    for (const board of mondayInbox.data?.boards ?? []) {
+      for (const item of [...(board.open_items ?? board.items), ...(board.done_items ?? [])]) {
+        for (const person of (item.assignee ?? '').split(',').map((part) => part.trim())) {
+          if (person) names.add(person);
+        }
+      }
+    }
+    return [...names].sort((a, b) => a.localeCompare(b));
+  }, [mondayInbox.data?.boards]);
+
+  const jiraAssignees = useMemo(() => {
+    const names = new Set<string>();
+    for (const project of jiraInbox.data?.projects ?? []) {
+      for (const item of [...(project.open_items ?? project.items), ...(project.done_items ?? [])]) {
+        if (item.assignee?.trim()) names.add(item.assignee.trim());
+      }
+    }
+    return [...names].sort((a, b) => a.localeCompare(b));
+  }, [jiraInbox.data?.projects]);
+
+  const filteredMondayBoards = useMemo(() => {
+    const boards = mondayInbox.data?.boards ?? [];
+    if (!assigneeFilter && !mondayIssueQuery.trim()) return boards;
+    return boards.filter((board) => {
+      const items = [
+        ...(board.open_items ?? board.items),
+        ...(board.done_items ?? []),
+      ];
+      return items.some((item) => {
+        if (!matchesAssigneeFilter(item.assignee, assigneeFilter)) return false;
+        const q = mondayIssueQuery.trim().toLowerCase();
+        if (!q) return true;
+        return (
+          item.name.toLowerCase().includes(q) ||
+          item.monday_item_id.toLowerCase().includes(q) ||
+          (item.assignee ?? '').toLowerCase().includes(q)
+        );
+      });
+    });
+  }, [mondayInbox.data?.boards, assigneeFilter, mondayIssueQuery]);
+
   const filteredJiraProjects = useMemo(() => {
     const projects = jiraInbox.data?.projects ?? [];
     return projects.filter((project) => {
       if (jiraProjectFilter && project.project_key !== jiraProjectFilter) return false;
+      const items = [...(project.open_items ?? project.items), ...(project.done_items ?? [])];
+      const hasPerson = !assigneeFilter
+        ? true
+        : items.some((item) => matchesAssigneeFilter(item.assignee, assigneeFilter));
+      if (!hasPerson) return false;
       if (!jiraIssueQuery.trim()) return true;
       const q = jiraIssueQuery.trim().toLowerCase();
       const prefix = q.includes('-') ? q.split('-')[0] : q;
@@ -566,12 +668,13 @@ export function IssuesListPage() {
         project.project_key.toLowerCase() === prefix ||
         project.jira_project_key.toLowerCase() === prefix ||
         project.label.toLowerCase().includes(q);
-      const hasMatchingItem =
-        (project.open_items ?? project.items).some((item) => matchesJiraItemQuery(q, item)) ||
-        (project.done_items ?? []).some((item) => matchesJiraItemQuery(q, item));
+      const hasMatchingItem = items.some(
+        (item) =>
+          matchesAssigneeFilter(item.assignee, assigneeFilter) && matchesJiraItemQuery(q, item),
+      );
       return projectMatches || hasMatchingItem;
     });
-  }, [jiraInbox.data?.projects, jiraProjectFilter, jiraIssueQuery]);
+  }, [jiraInbox.data?.projects, jiraProjectFilter, jiraIssueQuery, assigneeFilter]);
 
   async function handleImportMonday(item: MondayItem, boardKey: string) {
     const result = await importMondayMutation.mutateAsync({
@@ -721,6 +824,35 @@ export function IssuesListPage() {
             </div>
             <div className="flex shrink-0 flex-wrap items-center gap-2">
               <Select
+                value={assigneeFilter}
+                onChange={(e) => {
+                  const value = e.target.value;
+                  setAssigneeFilter(value);
+                  syncExternalUrl('monday', { assignee: value, query: mondayIssueQuery });
+                }}
+                className="w-48"
+              >
+                <option value="">{t('issues.monday.filterAllPeople')}</option>
+                <option value="__unassigned__">{t('issues.monday.filterUnassigned')}</option>
+                {mondayAssignees.map((person) => (
+                  <option key={person} value={person}>
+                    {person}
+                  </option>
+                ))}
+              </Select>
+              <div className="w-48">
+                <Input
+                  value={mondayIssueQuery}
+                  onChange={(e) => {
+                    const value = e.target.value;
+                    setMondayIssueQuery(value);
+                    syncExternalUrl('monday', { query: value, assignee: assigneeFilter });
+                  }}
+                  placeholder={t('issues.searchPlaceholder')}
+                  icon={<Search style={{ width: 16, height: 16 }} />}
+                />
+              </div>
+              <Select
                 value={externalStatusFilter}
                 onChange={(e) => setExternalStatusFilter(e.target.value as ExternalStatusFilter)}
                 className="w-40"
@@ -756,11 +888,20 @@ export function IssuesListPage() {
               <Card className="p-6 text-sm text-ink-500">{t('issues.monday.empty')}</Card>
             )}
 
-          {(mondayInbox.data?.boards ?? []).map((board) => (
+          {!mondayInbox.isLoading &&
+            !mondayInbox.isError &&
+            (mondayInbox.data?.boards.length ?? 0) > 0 &&
+            filteredMondayBoards.length === 0 && (
+              <Card className="p-6 text-sm text-ink-500">{t('issues.jira.filterEmpty')}</Card>
+            )}
+
+          {filteredMondayBoards.map((board) => (
             <MondayBoardSection
               key={board.board_key}
               board={board}
               statusFilter={externalStatusFilter}
+              assigneeFilter={assigneeFilter}
+              issueQuery={mondayIssueQuery}
               onImport={handleImportMonday}
               onRefresh={handleRefreshBoard}
               refreshing={refreshingBoardKey === board.board_key}
@@ -796,7 +937,7 @@ export function IssuesListPage() {
                 onChange={(e) => {
                   const value = e.target.value;
                   setJiraProjectFilter(value);
-                  syncJiraUrl('jira', value, jiraIssueQuery);
+                  syncExternalUrl('jira', { project: value, query: jiraIssueQuery });
                 }}
                 className="w-48"
               >
@@ -807,13 +948,38 @@ export function IssuesListPage() {
                   </option>
                 ))}
               </Select>
+              <Select
+                value={assigneeFilter}
+                onChange={(e) => {
+                  const value = e.target.value;
+                  setAssigneeFilter(value);
+                  syncExternalUrl('jira', {
+                    project: jiraProjectFilter,
+                    query: jiraIssueQuery,
+                    assignee: value,
+                  });
+                }}
+                className="w-48"
+              >
+                <option value="">{t('issues.jira.filterAllPeople')}</option>
+                <option value="__unassigned__">{t('issues.jira.filterUnassigned')}</option>
+                {jiraAssignees.map((person) => (
+                  <option key={person} value={person}>
+                    {person}
+                  </option>
+                ))}
+              </Select>
               <div className="w-48">
                 <Input
                   value={jiraIssueQuery}
                   onChange={(e) => {
                     const value = e.target.value;
                     setJiraIssueQuery(value);
-                    syncJiraUrl('jira', jiraProjectFilter, value);
+                    syncExternalUrl('jira', {
+                      project: jiraProjectFilter,
+                      query: value,
+                      assignee: assigneeFilter,
+                    });
                   }}
                   placeholder={t('issues.jira.filterIssuePlaceholder')}
                   icon={<Search style={{ width: 16, height: 16 }} />}
@@ -868,6 +1034,7 @@ export function IssuesListPage() {
               project={project}
               statusFilter={externalStatusFilter}
               issueQuery={jiraIssueQuery}
+              assigneeFilter={assigneeFilter}
               onImport={handleImportJira}
               onRefresh={handleRefreshProject}
               refreshing={refreshingProjectKey === project.project_key}

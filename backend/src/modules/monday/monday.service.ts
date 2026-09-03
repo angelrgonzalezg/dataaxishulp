@@ -7,7 +7,7 @@ import {
   requireMondaySettings,
 } from '../../config/monday';
 import { AppError, NotFoundError, ValidationError } from '../../utils/AppError';
-import { daysSinceUpdate, isStaleIssue, STALE_ISSUE_DAYS } from '../../utils/staleIssue';
+import { daysSinceUpdate, isExcludedFromLimbo, isLimboIssue, STALE_ISSUE_DAYS } from '../../utils/staleIssue';
 import type { IssuePriority } from '../../types/database.types';
 import * as issuesService from '../issues/issues.service';
 import {
@@ -84,7 +84,9 @@ function mapMondayItem(item: MondayRawItem, context: MondayMappingContext): Mond
     group: item.group.title,
     board: item.board.name,
     updated_at: item.updated_at,
-    monday_url: `https://view.monday.com/boards/${item.board.id}/pulses/${item.id}`,
+    monday_url:
+      item.url?.trim() ||
+      `https://monday.com/boards/${item.board.id}/pulses/${item.id}`,
     columns: item.column_values.map((column) => ({
       column_id: column.column.id,
       column_title: column.column.title,
@@ -170,7 +172,7 @@ async function attachLocalIssueLinks(
 }
 
 function isDoneItem(status: string | null, doneStatus: string): boolean {
-  return (status ?? '').trim().toLowerCase() === doneStatus.trim().toLowerCase();
+  return isExcludedFromLimbo(status, doneStatus);
 }
 
 async function listMondayBoardItems(
@@ -337,7 +339,12 @@ export async function getMondayDashboardSummary(): Promise<MondayDashboardSummar
     const now = new Date();
     const by_board = mondayData.boards.map((board) => {
       const openItems = board.open_items ?? board.items;
-      const stale_open = openItems.filter((item) => isStaleIssue(item.updated_at, now)).length;
+      const stale_open = openItems.filter((item) =>
+        isLimboIssue(item.updated_at, item.status, {
+          doneStatus: settings.doneStatus,
+          now,
+        }),
+      ).length;
       return {
         board_key: board.board_key,
         label: board.label,
@@ -361,7 +368,12 @@ export async function getMondayDashboardSummary(): Promise<MondayDashboardSummar
     const stale_items = mondayData.boards
       .flatMap((board) =>
         (board.open_items ?? board.items)
-          .filter((item) => isStaleIssue(item.updated_at, now))
+          .filter((item) =>
+            isLimboIssue(item.updated_at, item.status, {
+              doneStatus: settings.doneStatus,
+              now,
+            }),
+          )
           .map((item) => {
             const days = daysSinceUpdate(item.updated_at, now) ?? STALE_ISSUE_DAYS;
             return {
@@ -369,6 +381,7 @@ export async function getMondayDashboardSummary(): Promise<MondayDashboardSummar
               title: item.name,
               board_key: board.board_key,
               board_label: board.label,
+              assignee: item.assignee,
               updated_at: item.updated_at,
               days_stale: days,
               url: item.monday_url,
@@ -376,7 +389,16 @@ export async function getMondayDashboardSummary(): Promise<MondayDashboardSummar
           }),
       )
       .sort((a, b) => b.days_stale - a.days_stale)
-      .slice(0, 8);
+      .slice(0, 100);
+
+    const assignees = [
+      ...new Set(
+        mondayData.boards
+          .flatMap((board) => board.open_items ?? board.items)
+          .map((item) => item.assignee?.trim())
+          .filter((name): name is string => Boolean(name)),
+      ),
+    ].sort((a, b) => a.localeCompare(b));
 
     return {
       configured: true,
@@ -389,6 +411,7 @@ export async function getMondayDashboardSummary(): Promise<MondayDashboardSummar
       },
       by_board,
       stale_items,
+      assignees,
     };
   } catch {
     return {
@@ -406,6 +429,7 @@ export async function getMondayDashboardSummary(): Promise<MondayDashboardSummar
         stale_open: 0,
       })),
       stale_items: [],
+      assignees: [],
     };
   }
 }

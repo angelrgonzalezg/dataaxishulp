@@ -7,7 +7,7 @@ import {
   requireJiraSettings,
 } from '../../config/jira';
 import { AppError, NotFoundError, ValidationError } from '../../utils/AppError';
-import { daysSinceUpdate, isStaleIssue, STALE_ISSUE_DAYS } from '../../utils/staleIssue';
+import { daysSinceUpdate, isExcludedFromLimbo, isLimboIssue, STALE_ISSUE_DAYS } from '../../utils/staleIssue';
 import type { IssuePriority } from '../../types/database.types';
 import * as issuesService from '../issues/issues.service';
 import {
@@ -64,7 +64,7 @@ function mapJiraItem(issue: JiraRawIssue, settings: JiraSettings, projectLabel: 
 
 function isDoneItem(item: JiraItemDto, doneStatus: string): boolean {
   if ((item.status_category ?? '').toLowerCase() === 'done') return true;
-  return (item.status ?? '').trim().toLowerCase() === doneStatus.trim().toLowerCase();
+  return isExcludedFromLimbo(item.status, doneStatus);
 }
 
 function buildDescription(item: JiraItemDto, projectLabel: string): string {
@@ -358,7 +358,12 @@ export async function getJiraDashboardSummary(): Promise<JiraDashboardSummary | 
     const now = new Date();
     const by_project = jiraData.projects.map((project) => {
       const openItems = project.open_items ?? project.items;
-      const stale_open = openItems.filter((item) => isStaleIssue(item.updated_at, now)).length;
+      const stale_open = openItems.filter((item) =>
+        isLimboIssue(item.updated_at, item.status, {
+          doneStatus: settings.doneStatus,
+          now,
+        }),
+      ).length;
       return {
         project_key: project.project_key,
         jira_project_key: project.jira_project_key,
@@ -383,7 +388,12 @@ export async function getJiraDashboardSummary(): Promise<JiraDashboardSummary | 
     const stale_items = jiraData.projects
       .flatMap((project) =>
         (project.open_items ?? project.items)
-          .filter((item) => isStaleIssue(item.updated_at, now))
+          .filter((item) =>
+            isLimboIssue(item.updated_at, item.status, {
+              doneStatus: settings.doneStatus,
+              now,
+            }),
+          )
           .map((item) => {
             const days = daysSinceUpdate(item.updated_at, now) ?? STALE_ISSUE_DAYS;
             return {
@@ -392,6 +402,7 @@ export async function getJiraDashboardSummary(): Promise<JiraDashboardSummary | 
               title: item.name,
               project_key: project.project_key,
               project_label: project.label,
+              assignee: item.assignee,
               updated_at: item.updated_at,
               days_stale: days,
               url: item.jira_url,
@@ -399,7 +410,16 @@ export async function getJiraDashboardSummary(): Promise<JiraDashboardSummary | 
           }),
       )
       .sort((a, b) => b.days_stale - a.days_stale)
-      .slice(0, 8);
+      .slice(0, 100);
+
+    const assignees = [
+      ...new Set(
+        jiraData.projects
+          .flatMap((project) => project.open_items ?? project.items)
+          .map((item) => item.assignee?.trim())
+          .filter((name): name is string => Boolean(name)),
+      ),
+    ].sort((a, b) => a.localeCompare(b));
 
     return {
       configured: true,
@@ -412,6 +432,7 @@ export async function getJiraDashboardSummary(): Promise<JiraDashboardSummary | 
       },
       by_project,
       stale_items,
+      assignees,
     };
   } catch (error) {
     const message =
@@ -425,6 +446,7 @@ export async function getJiraDashboardSummary(): Promise<JiraDashboardSummary | 
       totals: { open: 0, done: 0, total: 0, imported_local: 0, stale_open: 0 },
       by_project: [],
       stale_items: [],
+      assignees: [],
     };
   }
 }
