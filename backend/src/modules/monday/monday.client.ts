@@ -153,6 +153,7 @@ export async function resolveGroupId(
 export interface MondayRawItem {
   id: string;
   name: string;
+  url?: string | null;
   updated_at: string | null;
   group: { id: string; title: string };
   board: { id: string; name: string };
@@ -194,6 +195,7 @@ export async function fetchGroupItems(
               items {
                 id
                 name
+                url
                 updated_at
                 group { id title }
                 board { id name }
@@ -230,6 +232,7 @@ export async function fetchItemById(
       items(ids: $itemIds) {
         id
         name
+        url
         updated_at
         group { id title }
         board { id name }

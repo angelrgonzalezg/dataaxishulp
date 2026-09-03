@@ -9,6 +9,7 @@ import type {
   IssueUpdateInput,
 } from './issues.types';
 import * as mondayService from '../monday/monday.service';
+import * as jiraService from '../jira/jira.service';
 
 function actorId(req: Request): number {
   if (!req.user) throw new UnauthorizedError();
@@ -101,6 +102,49 @@ export async function importMondayItem(
     );
     res.status(result.created ? 201 : 200).json(
       successResponse(result, result.created ? 'Issue created from Monday item' : 'Issue already linked'),
+    );
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function listJiraItems(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    const query = req.query as { projectKey?: string; includeDone?: boolean };
+    const result = await jiraService.listJiraItems(query.projectKey, {
+      includeDone: query.includeDone ?? false,
+    });
+    res.json(successResponse(result));
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function importJiraItem(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    const projectKey =
+      typeof req.query.projectKey === 'string' ? req.query.projectKey.trim() : '';
+    if (!projectKey) {
+      throw new ValidationError('projectKey query parameter is required');
+    }
+    const result = await jiraService.importJiraItem(
+      String(req.params.jiraIssueKey),
+      projectKey,
+      actorId(req),
+    );
+    res.status(result.created ? 201 : 200).json(
+      successResponse(
+        result,
+        result.created ? 'Issue created from Jira issue' : 'Issue already linked',
+      ),
     );
   } catch (error) {
     next(error);

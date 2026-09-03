@@ -57,3 +57,19 @@ export const mondayBoardQuerySchema = z.object({
 export const mondayImportQuerySchema = z.object({
   boardKey: z.string().min(1).max(40),
 });
+
+export const jiraIssueKeyParamsSchema = z.object({
+  jiraIssueKey: z.string().min(1).max(40),
+});
+
+export const jiraProjectQuerySchema = z.object({
+  projectKey: z.string().min(1).max(40).optional(),
+  includeDone: z
+    .enum(['true', 'false'])
+    .optional()
+    .transform((value) => value === 'true'),
+});
+
+export const jiraImportQuerySchema = z.object({
+  projectKey: z.string().min(1).max(40),
+});
