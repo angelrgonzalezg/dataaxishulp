@@ -54,3 +54,12 @@ export function mondayBoardTheme(boardKey: string) {
 export function mondayBoardBarColor(boardKey: string) {
   return MONDAY_BOARD_BAR_COLORS[boardKey] ?? 'bg-brand-500';
 }
+
+/** Board name plus Monday group (Issues vs Tickets) for Limbo and filters. */
+export function formatMondaySourceLabel(boardLabel: string, group?: string | null): string {
+  const label = boardLabel.trim();
+  const groupName = group?.trim();
+  if (!groupName) return label;
+  if (label.toLowerCase() === groupName.toLowerCase()) return label;
+  return `${label} · ${groupName}`;
+}

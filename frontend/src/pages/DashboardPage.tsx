@@ -19,7 +19,7 @@ import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
 import { useAuth } from '@/hooks/useAuth';
 import { useDashboardOverview } from '@/hooks/useDashboard';
-import { mondayBoardBarColor } from '@/lib/mondayBoardThemes';
+import { formatMondaySourceLabel, mondayBoardBarColor } from '@/lib/mondayBoardThemes';
 import { STALE_ISSUE_DAYS } from '@/lib/staleIssue';
 import type { JiraDashboardSummary, MondayDashboardSummary } from '@/types';
 
@@ -122,7 +122,7 @@ function ExternalSourcePanel({
   const allRows = isMonday
     ? (monday?.by_board ?? []).map((board) => ({
         key: board.board_key,
-        label: board.label,
+        label: formatMondaySourceLabel(board.label, board.group),
         open: board.open,
         done: board.done,
         total: board.total,
@@ -440,7 +440,9 @@ export function DashboardPage() {
         if (issueQuery.trim()) {
           const q = issueQuery.trim().toLowerCase();
           return (
-            board.label.toLowerCase().includes(q) || board.board_key.toLowerCase().includes(q)
+            board.label.toLowerCase().includes(q) ||
+            (board.group ?? '').toLowerCase().includes(q) ||
+            board.board_key.toLowerCase().includes(q)
           );
         }
         return true;
@@ -505,7 +507,9 @@ export function DashboardPage() {
         .map((item) => ({
           id: item.id,
           title: item.title,
-          meta: [item.board_label, item.assignee].filter(Boolean).join(' · '),
+          meta: [formatMondaySourceLabel(item.board_label, item.group), item.assignee]
+            .filter(Boolean)
+            .join(' · '),
           days: item.days_stale,
           href: item.url,
           localHref: `/issues?tab=monday&q=${encodeURIComponent(item.title)}${

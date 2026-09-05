@@ -581,6 +581,7 @@ export function StatusWallPage() {
                         style={{ color: boardHex(item.board_key) }}
                       >
                         ● {item.board_label}
+                        {item.group ? ` · ${item.group}` : ''}
                       </span>
                       {item.status && <span>{item.status}</span>}
                       {item.assignee && (

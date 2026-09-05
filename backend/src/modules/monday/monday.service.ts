@@ -348,6 +348,7 @@ export async function getMondayDashboardSummary(): Promise<MondayDashboardSummar
       return {
         board_key: board.board_key,
         label: board.label,
+        group: board.group,
         open: board.counts.open,
         done: board.counts.done,
         total: board.counts.total,
@@ -381,6 +382,7 @@ export async function getMondayDashboardSummary(): Promise<MondayDashboardSummar
               title: item.name,
               board_key: board.board_key,
               board_label: board.label,
+              group: item.group || board.group,
               assignee: item.assignee,
               updated_at: item.updated_at,
               days_stale: days,
@@ -423,6 +425,7 @@ export async function getMondayDashboardSummary(): Promise<MondayDashboardSummar
       by_board: settings.boards.map((board) => ({
         board_key: board.key,
         label: board.label,
+        group: board.groupName,
         open: 0,
         done: 0,
         total: 0,

@@ -53,6 +53,7 @@ export interface MondayDashboardSummary {
   by_board: Array<{
     board_key: string;
     label: string;
+    group: string;
     open: number;
     done: number;
     total: number;
@@ -63,6 +64,7 @@ export interface MondayDashboardSummary {
     title: string;
     board_key: string;
     board_label: string;
+    group: string;
     assignee: string | null;
     updated_at: string | null;
     days_stale: number;
