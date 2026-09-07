@@ -589,6 +589,10 @@ export const en = {
     externalRefLabel: 'External reference',
     assignedToLabel: 'Assigned to',
     resolutionLabel: 'Resolution notes',
+    analyzeInCursor: 'Analyze in Cursor',
+    analyzeInCursorHint:
+      'Opens Cursor with a diagnosis prompt. Confirm it there; the agent will not apply changes until you ask.',
+    analyzeInCursorOpened: 'Cursor opened. Confirm the prompt to start the diagnosis.',
     resolve: 'Resolve',
     resolveTitle: 'Resolve issue',
     history: 'History',

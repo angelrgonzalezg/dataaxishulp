@@ -592,6 +592,10 @@ export const es = {
     externalRefLabel: 'Referencia externa',
     assignedToLabel: 'Asignado a',
     resolutionLabel: 'Notas de resolución',
+    analyzeInCursor: 'Analizar en Cursor',
+    analyzeInCursorHint:
+      'Abre Cursor con un prompt de diagnóstico. Confirma el prompt allí; el agente no aplica cambios hasta que lo pidas.',
+    analyzeInCursorOpened: 'Se abrió Cursor. Confirma el prompt para empezar el diagnóstico.',
     resolve: 'Resolver',
     resolveTitle: 'Resolver issue',
     history: 'Historial',

@@ -19,8 +19,10 @@ import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
 import { useAuth } from '@/hooks/useAuth';
 import { useDashboardOverview } from '@/hooks/useDashboard';
+import { AnalyzeInCursorButton } from '@/components/AnalyzeInCursorButton';
 import { formatMondaySourceLabel, mondayBoardBarColor } from '@/lib/mondayBoardThemes';
 import { STALE_ISSUE_DAYS } from '@/lib/staleIssue';
+import type { CursorIssueRef } from '@/lib/cursorIssuePrompt';
 import type { JiraDashboardSummary, MondayDashboardSummary } from '@/types';
 
 const DASHBOARD_SOURCE_KEY = 'dataaxis-hulp-dashboard-issue-source';
@@ -497,6 +499,15 @@ export function DashboardPage() {
           localHref: `/issues?tab=jira&project=${encodeURIComponent(item.project_key)}&q=${encodeURIComponent(item.key)}${
             item.assignee ? `&assignee=${encodeURIComponent(item.assignee)}` : ''
           }`,
+          cursorIssue: {
+            source: 'jira' as const,
+            title: item.title,
+            issueKey: item.key,
+            url: item.url,
+            project: item.project_label,
+            assignee: item.assignee,
+            daysStale: item.days_stale,
+          } satisfies CursorIssueRef,
         }));
     }
     if (source === 'monday') {
@@ -515,6 +526,16 @@ export function DashboardPage() {
           localHref: `/issues?tab=monday&q=${encodeURIComponent(item.title)}${
             item.assignee ? `&assignee=${encodeURIComponent(item.assignee.split(',')[0].trim())}` : ''
           }`,
+          cursorIssue: {
+            source: 'monday' as const,
+            title: item.title,
+            url: item.url,
+            board: item.board_label,
+            group: item.group,
+            boardKey: item.board_key,
+            assignee: item.assignee,
+            daysStale: item.days_stale,
+          } satisfies CursorIssueRef,
         }));
     }
     return (data.stale_issues ?? []).map((item) => ({
@@ -524,6 +545,15 @@ export function DashboardPage() {
       days: item.days_stale,
       href: null as string | null,
       localHref: `/issues/${item.issue_id}`,
+      cursorIssue: {
+        source: (item.source ?? 'local') as CursorIssueRef['source'],
+        title: item.title,
+        status: item.status,
+        priority: item.priority,
+        assignee: item.assigned_to,
+        project: item.system_name,
+        daysStale: item.days_stale,
+      } satisfies CursorIssueRef,
     }));
   }, [data, source, projectFilter, assigneeFilter]);
 
@@ -775,6 +805,7 @@ export function DashboardPage() {
                             {source === 'jira' ? 'Jira' : source === 'monday' ? 'Monday' : ''}
                           </a>
                         )}
+                        <AnalyzeInCursorButton issue={item.cursorIssue} variant="link" />
                         <Link
                           to={item.localHref}
                           className="text-xs font-semibold text-ink-600 hover:text-brand-700 hover:underline"

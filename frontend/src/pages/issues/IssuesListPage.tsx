@@ -24,6 +24,8 @@ import type {
 } from '@/types';
 import { mondayBoardTheme } from '@/lib/mondayBoardThemes';
 import { daysSinceUpdate, isExcludedFromLimbo, isLimboIssue } from '@/lib/staleIssue';
+import { AnalyzeInCursorButton } from '@/components/AnalyzeInCursorButton';
+import { cursorIssueFromJira, cursorIssueFromMonday } from '@/lib/cursorIssuePrompt';
 
 const STATUSES: IssueStatus[] = ['open', 'in_progress', 'resolved', 'closed'];
 const PRIORITIES: IssuePriority[] = ['low', 'medium', 'high', 'critical'];
@@ -167,6 +169,9 @@ function MondayItemRow({
             Monday
           </a>
         )}
+        <AnalyzeInCursorButton
+          issue={cursorIssueFromMonday(item, boardKey, daysSinceUpdate(item.updated_at))}
+        />
         {localIssueId ? (
           <Link to={`/issues/${localIssueId}`}>
             <Button variant="secondary" size="sm">
@@ -382,6 +387,9 @@ function JiraItemRow({
             Jira
           </a>
         )}
+        <AnalyzeInCursorButton
+          issue={cursorIssueFromJira(item, daysSinceUpdate(item.updated_at))}
+        />
         {localIssueId ? (
           <Link to={`/issues/${localIssueId}`}>
             <Button variant="secondary" size="sm">
