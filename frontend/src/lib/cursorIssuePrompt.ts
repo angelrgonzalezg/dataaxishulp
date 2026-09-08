@@ -65,6 +65,7 @@ export function buildCursorIssuePrompt(issue: CursorIssueRef, locale: 'en' | 'es
       '   C) Es de otro sistema (Kador, Tereno, QuickBooks, Power Automate, mapping). Di qué hay que cambiar allí y por qué Hulp no debe tocarlo.',
       '',
       'Workspaces: Dataaxishulp (C:\\DataAxis\\Dataaxishulp) y el Kadaster del island según el board.',
+      'Cada isla tiene diferencias (schema, A-register, dialecto). No copies un arreglo de Statia a Saba, Bonaire o Aruba.',
     ].join('\n');
   }
 
@@ -83,6 +84,7 @@ export function buildCursorIssuePrompt(issue: CursorIssueRef, locale: 'en' | 'es
     '   C) It belongs to another system (Kador, Tereno, QuickBooks, Power Automate, mapping). Say what must change there and why Hulp should not touch it.',
     '',
     'Workspaces: Dataaxishulp (C:\\DataAxis\\Dataaxishulp) and the island Kadaster app for this board.',
+    'Each island has differences (schema, A-register, dialect). Do not copy a Statia fix onto Saba, Bonaire, or Aruba.',
   ].join('\n');
 }
 

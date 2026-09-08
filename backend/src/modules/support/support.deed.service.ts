@@ -4,6 +4,7 @@ import {
   DEFAULT_SYSTEM_KEY,
   asNumberIds,
   buildFrame,
+  getDialectProfile,
   getFieldNumber,
   getFieldString,
   isTerenoDialect,
@@ -55,8 +56,7 @@ async function resolveSeedDeeds(
   // Tereno/DLV: Deed.legalFactRegisterId → LegalFactRegister.id
   // Kadaster:   Deed.DeedTypeId → LegalFactRegister.id
   const dialect = await resolveSystemDialect(systemKey);
-  const tereno = isTerenoDialect(dialect);
-  const registerFk = tereno ? 'legalFactRegisterId' : 'DeedTypeId';
+  const registerFk = getDialectProfile(dialect).deedRegisterId
 
   // Use querySystem (not querySafe): a bad SQL used to return [] and look like "not found".
   // Bracket [number] — reserved/ambiguous as bare identifier with some drivers.

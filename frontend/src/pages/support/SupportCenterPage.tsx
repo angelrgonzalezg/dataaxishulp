@@ -785,26 +785,31 @@ export function SupportCenterPage() {
   const showVoidOrderTool = activeOrderIdForTools != null;
   const showChangeParcelTool = activeOrderIdForTools != null;
   const showChangeDeedTool = activeOrderIdForTools != null;
+  const showCorrectRegisterTitleTool = Boolean(activeSystemKey);
   const showRetireSubjectTool = Boolean(data?.found);
   const dialect = selectedSystem?.dialect ?? data?.dialect;
   const showResolutionTools =
-    Boolean(data?.found) &&
     Boolean(activeSystemKey) &&
-    ((isTerenoDialect(dialect) && (showChangeTypeAkteTool || showReopenBestellingTool)) ||
-      showChangeNotarisTool ||
-      showVoidOrderTool ||
-      showChangeParcelTool ||
-      showChangeDeedTool ||
-      showRetireSubjectTool);
+    ((Boolean(data?.found) &&
+      ((isTerenoDialect(dialect) && (showChangeTypeAkteTool || showReopenBestellingTool)) ||
+        showChangeNotarisTool ||
+        showVoidOrderTool ||
+        showChangeParcelTool ||
+        showChangeDeedTool ||
+        showRetireSubjectTool)) ||
+      showCorrectRegisterTitleTool);
 
   const retireInitialRegisterTitle = useMemo(() => {
-    if (!data?.found) return null;
-    if ('register_title' in data && data.register_title) return data.register_title;
-    if (data.summary && 'register_title' in data.summary && data.summary.register_title) {
-      return data.summary.register_title;
+    if (data?.found) {
+      if ('register_title' in data && data.register_title) return data.register_title;
+      if (data.summary && 'register_title' in data.summary && data.summary.register_title) {
+        return data.summary.register_title;
+      }
     }
+    if (entryMode === 'deed_history') return deedHistoryInput.trim() || null;
+    if (entryMode === 'register_deed') return registerInput.trim() || null;
     return null;
-  }, [data]);
+  }, [data, entryMode, deedHistoryInput, registerInput]);
 
   const retireInitialParcelEsri = useMemo(() => {
     if (!data?.found) return null;
@@ -977,6 +982,7 @@ export function SupportCenterPage() {
           showVoidOrder={showVoidOrderTool}
           showChangeParcel={showChangeParcelTool}
           showChangeDeed={showChangeDeedTool}
+          showCorrectRegisterTitle={showCorrectRegisterTitleTool}
           onOpenDeedTitle={openDeedHistoryFromOrder}
         />
       )}

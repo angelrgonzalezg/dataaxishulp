@@ -695,6 +695,46 @@ export interface ChangeOrderDeedResult {
   raw: Record<string, unknown>;
 }
 
+export interface DeedTitleOccupancy {
+  deed_id: number;
+  register_title: string;
+  register: string | null;
+  segment: number | null;
+  number: number | null;
+  approval_id: number | null;
+  is_retired: boolean;
+  legal_fact_code: string | null;
+  legal_fact_name: string | null;
+  deed_detail_count: number;
+  a_register_count: number;
+  order_link_count: number;
+  register_row_count: number;
+  deed_document_count: number;
+  extra_link_count: number;
+  is_orphan: boolean;
+  block_reasons: string[];
+}
+
+export interface CorrectRegisterTitleResult {
+  system_key: string;
+  system_name: string;
+  dialect: string;
+  island: string;
+  is_production: boolean;
+  preview_only: boolean;
+  can_apply: boolean;
+  from_title: string;
+  to_title: string;
+  source: DeedTitleOccupancy;
+  occupying: DeedTitleOccupancy | null;
+  will_release_orphan: boolean;
+  will_update_akte_links: number;
+  will_update_register_rows: number;
+  actions: string[];
+  blockers: string[];
+  island_notes: string[];
+}
+
 export interface RetireSubjectCandidate {
   deed_detail_id: number;
   deed_id: number;

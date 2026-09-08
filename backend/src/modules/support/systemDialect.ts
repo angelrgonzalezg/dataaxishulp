@@ -41,6 +41,20 @@ export function isKadasterLikeDialect(dialect: SystemDialect): boolean {
   return dialect === 'kadaster' || dialect === 'bonaire';
 }
 
+/** Concrete island/family. Dialect is the schema family; this is the place. */
+export const ISLAND_FAMILIES = ['statia', 'saba', 'bonaire', 'aruba', 'atl', 'unknown'] as const;
+export type IslandFamily = (typeof ISLAND_FAMILIES)[number];
+
+export function inferIslandFromSystemKey(systemKey: string): IslandFamily {
+  const key = systemKey.toLowerCase();
+  if (key.includes('statia')) return 'statia';
+  if (key.includes('saba')) return 'saba';
+  if (key.includes('bonaire')) return 'bonaire';
+  if (key.includes('aruba') || key.includes('dlv') || key.includes('tereno')) return 'aruba';
+  if (key.includes('atl')) return 'atl';
+  return 'unknown';
+}
+
 export type DialectTableProfile = {
   parcelTable: string;
   parcelIdColumn: string;

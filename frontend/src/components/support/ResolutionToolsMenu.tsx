@@ -11,6 +11,7 @@ import { ChangeDeedOnOrderTool } from '@/components/support/ChangeDeedOnOrderToo
 import { ChangeParcelOnOrderTool } from '@/components/support/ChangeParcelOnOrderTool';
 import { ChangeNotarisTool } from '@/components/support/ChangeNotarisTool';
 import { VerifyOrderTool } from '@/components/support/VerifyOrderTool';
+import { CorrectRegisterTitleTool } from '@/components/support/CorrectRegisterTitleTool';
 import type { DeedTypeAkteOption } from '@/types';
 
 type ResolutionToolId =
@@ -21,7 +22,8 @@ type ResolutionToolId =
   | 'retire_subject'
   | 'void_order'
   | 'change_parcel'
-  | 'change_deed';
+  | 'change_deed'
+  | 'correct_register_title';
 
 type ResolutionToolsMenuProps = {
   systemKey: string;
@@ -42,6 +44,7 @@ type ResolutionToolsMenuProps = {
   showVoidOrder?: boolean;
   showChangeParcel?: boolean;
   showChangeDeed?: boolean;
+  showCorrectRegisterTitle?: boolean;
   onOpenDeedTitle?: (title: string) => void;
 };
 
@@ -64,6 +67,7 @@ export function ResolutionToolsMenu({
   showVoidOrder = true,
   showChangeParcel = true,
   showChangeDeed = true,
+  showCorrectRegisterTitle = true,
   onOpenDeedTitle,
 }: ResolutionToolsMenuProps) {
   const { t } = useTranslation();
@@ -110,6 +114,11 @@ export function ResolutionToolsMenu({
           available: showChangeDeed && orderId != null && orderId > 0,
         },
         {
+          id: 'correct_register_title' as const,
+          label: t('support.tools.correctRegisterTitle.title'),
+          available: showCorrectRegisterTitle,
+        },
+        {
           id: 'retire_subject' as const,
           label: t('support.tools.retireSubject.title'),
           available: showRetireSubject,
@@ -127,6 +136,7 @@ export function ResolutionToolsMenu({
       showVoidOrder,
       showChangeParcel,
       showChangeDeed,
+      showCorrectRegisterTitle,
       t,
     ],
   );
@@ -428,6 +438,39 @@ export function ResolutionToolsMenu({
               isProduction={isProduction}
               systemName={systemName}
               orderId={orderId}
+            />
+          </div>
+        </div>
+      )}
+
+      {openTool === 'correct_register_title' && (
+        <div
+          className="fixed inset-0 z-40 flex items-start justify-center overflow-y-auto bg-ink-950/40 p-4 sm:p-8"
+          onClick={closeTool}
+          role="presentation"
+        >
+          <div
+            className="relative my-4 w-full max-w-4xl"
+            onClick={(event) => event.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+          >
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              className="absolute right-3 top-3 z-10"
+              onClick={closeTool}
+            >
+              <X style={{ width: 14, height: 14 }} />
+              {t('support.tools.close')}
+            </Button>
+            <CorrectRegisterTitleTool
+              systemKey={systemKey}
+              isProduction={isProduction}
+              systemName={systemName}
+              initialFromTitle={initialRegisterTitle}
+              registerTitleOptions={registerTitleOptions}
             />
           </div>
         </div>

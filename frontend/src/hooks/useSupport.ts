@@ -18,6 +18,7 @@ import {
   fetchOrderDeedLinks,
   searchDeedByTitle,
   changeOrderDeed,
+  correctRegisterTitle,
   retireSubjectFromDeed,
   correctOwnershipShare,
   updateDeedLegalFact,
@@ -378,6 +379,25 @@ export function useChangeOrderDeed() {
         void queryClient.invalidateQueries({
           queryKey: ['support', 'orderDeedLinks', variables.systemKey, data.order_id],
         });
+      }
+    },
+  });
+}
+
+export function useCorrectRegisterTitle() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (payload: {
+      systemKey: string;
+      fromTitle: string;
+      toTitle: string;
+      fromDeedId?: number;
+      previewOnly: boolean;
+      confirm?: true;
+    }) => correctRegisterTitle(payload),
+    onSuccess: (_data, variables) => {
+      if (!variables.previewOnly) {
+        void queryClient.invalidateQueries({ queryKey: ['support'] });
       }
     },
   });

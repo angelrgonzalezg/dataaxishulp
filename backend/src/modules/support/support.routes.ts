@@ -35,6 +35,7 @@ import {
   listOrderDeedLinks,
   resolveDeedByTitle,
 } from './support.order.change.deed.service';
+import { correctRegisterTitle } from './support.deed.renumber.service';
 import { verifyOrder } from './support.order.verify.service';
 import {
   lookupRetireSubjectCandidates,
@@ -157,6 +158,15 @@ const parcelEsriSearchSchema = z.object({
 const deedTitleSearchSchema = z.object({
   systemKey: z.string().min(1).optional(),
   title: z.string().min(1),
+});
+
+const correctRegisterTitleSchema = z.object({
+  systemKey: z.string().min(1),
+  fromTitle: z.string().min(1),
+  toTitle: z.string().min(1),
+  fromDeedId: z.coerce.number().int().positive().optional(),
+  previewOnly: z.boolean(),
+  confirm: z.literal(true).optional(),
 });
 
 const retireSubjectLookupSchema = z.object({
@@ -700,6 +710,41 @@ router.get(
         systemKey,
       });
       res.json(successResponse(data, 'Order verification'));
+    } catch (error) {
+      next(error);
+    }
+  },
+);
+
+router.post(
+  '/deeds/correct-register-title',
+  requirePermission('support.edit'),
+  validate(correctRegisterTitleSchema, 'body'),
+  async (req, res, next) => {
+    try {
+      const body = req.body as z.infer<typeof correctRegisterTitleSchema>;
+      if (!body.previewOnly && body.confirm !== true) {
+        throw new ValidationError(
+          'Confirmation required. Set confirm=true to correct the Register-Deel-Nummer.',
+        );
+      }
+      const data = await correctRegisterTitle({
+        systemKey: body.systemKey,
+        fromTitle: body.fromTitle,
+        toTitle: body.toTitle,
+        fromDeedId: body.fromDeedId,
+        previewOnly: body.previewOnly,
+        confirm: body.confirm,
+        updatedBy: req.user?.username ?? 'dataaxis-hulp',
+      });
+      res.json(
+        successResponse(
+          data,
+          body.previewOnly
+            ? 'Correct Register-Deel-Nummer preview'
+            : 'Register-Deel-Nummer updated',
+        ),
+      );
     } catch (error) {
       next(error);
     }

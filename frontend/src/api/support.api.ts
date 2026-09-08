@@ -14,6 +14,7 @@ import type {
   OrderDeedLinksResult,
   DeedTitleSearchResult,
   ChangeOrderDeedResult,
+  CorrectRegisterTitleResult,
   RetireSubjectCandidate,
   RetireSubjectLookupResult,
   RetireSubjectResult,
@@ -202,6 +203,18 @@ export async function searchDeedByTitle(systemKey: string, title: string) {
     params: { systemKey, title },
   });
   return data.data as DeedTitleSearchResult;
+}
+
+export async function correctRegisterTitle(payload: {
+  systemKey: string;
+  fromTitle: string;
+  toTitle: string;
+  fromDeedId?: number;
+  previewOnly: boolean;
+  confirm?: true;
+}) {
+  const { data } = await api.post('/support/deeds/correct-register-title', payload);
+  return data.data as CorrectRegisterTitleResult;
 }
 
 export async function changeOrderDeed(
