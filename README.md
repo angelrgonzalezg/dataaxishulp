@@ -42,6 +42,13 @@ npm run install:all   # first time only: installs root + backend + frontend deps
 npm run dev           # starts backend (3021) and frontend (3020) together
 ```
 
+The sidebar shows the app version from `frontend/package.json` (same pattern as Thuiszorg). Bump it with:
+
+```bash
+cd frontend
+npm version patch   # or minor / major
+```
+
 ### 1. Application database
 
 Create the `DataAxisHulp` database on local SQL Server (SSMS or `sqlcmd`):

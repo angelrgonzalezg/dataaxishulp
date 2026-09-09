@@ -2,6 +2,7 @@ import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { cn } from '@/lib/cn';
 import { BRAND_ASSETS } from '@/config/branding';
+import { AppVersionBadge } from '@/components/branding/AppVersionBadge';
 
 type AppBrandVariant = 'login' | 'sidebar' | 'icon';
 
@@ -41,9 +42,12 @@ export function AppBrand({
       />
       {showText && (
         <div className="min-w-0">
-          <p className={cn('text-sm font-bold leading-tight', onDark ? 'text-white' : 'text-ink-900')}>
-            {t('common.appName')}
-          </p>
+          <div className="flex items-center gap-2">
+            <p className={cn('truncate text-sm font-bold leading-tight', onDark ? 'text-white' : 'text-ink-900')}>
+              {t('common.appName')}
+            </p>
+            <AppVersionBadge onDark={onDark} />
+          </div>
           <p className={cn('text-xs', onDark ? 'text-white/70' : 'text-ink-400')}>
             {t('common.appTagline')}
           </p>

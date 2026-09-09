@@ -13,6 +13,7 @@ import { Input } from '@/components/ui/Input';
 import { Field } from '@/components/ui/Field';
 import { LanguageSwitcher } from '@/components/LanguageSwitcher';
 import { AppBrand } from '@/components/branding/AppBrand';
+import { AppVersionBadge } from '@/components/branding/AppVersionBadge';
 import { useAuth } from '@/hooks/useAuth';
 import { extractErrorMessage } from '@/api/client';
 
@@ -101,7 +102,10 @@ export function LoginPage() {
               transition={{ delay: 0.35, duration: 0.5 }}
               className="mt-6 text-lg font-semibold text-white/90"
             >
-              {t('common.appName')}
+              <span className="inline-flex items-center gap-2">
+                {t('common.appName')}
+                <AppVersionBadge />
+              </span>
               <span className="mx-2 font-normal text-white/50">·</span>
               {t('common.companyName')}
             </motion.p>
