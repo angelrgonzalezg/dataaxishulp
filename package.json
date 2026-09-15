@@ -1,6 +1,6 @@
 {
   "name": "dataaxis-hulp",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "private": true,
   "description": "DataAxis Hulp — monorepo launcher (backend + frontend)",
   "scripts": {
