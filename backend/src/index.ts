@@ -1,6 +1,7 @@
 import app from './app';
 import { env } from './config/env';
 import { connectDb, disconnectDb } from './config/db';
+import { startOpsPoller, stopOpsPoller } from './modules/opsMonitor/opsPoller';
 
 async function bootstrap(): Promise<void> {
   try {
@@ -10,6 +11,8 @@ async function bootstrap(): Promise<void> {
     console.warn('Could not connect to SQL Server — server will start anyway:', error);
   }
 
+  startOpsPoller();
+
   const server = app.listen(env.PORT, () => {
     console.log(`DataAxis Hulp API running on http://localhost:${env.PORT}/api/v1`);
     console.log(`Environment: ${env.NODE_ENV}`);
@@ -18,6 +21,7 @@ async function bootstrap(): Promise<void> {
   const shutdown = async (signal: string) => {
     console.log(`\n${signal} received — shutting down gracefully`);
     server.close(async () => {
+      stopOpsPoller();
       await disconnectDb();
       process.exit(0);
     });

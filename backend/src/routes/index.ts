@@ -5,6 +5,7 @@ import issuesRoutes from '../modules/issues/issues.routes';
 import systemsRoutes from '../modules/systems/systems.routes';
 import dashboardRoutes from '../modules/dashboard/dashboard.routes';
 import supportRoutes from '../modules/support/support.routes';
+import opsMonitorRoutes from '../modules/opsMonitor/opsMonitor.routes';
 
 const router = Router();
 
@@ -18,5 +19,6 @@ router.use('/issues', issuesRoutes);
 router.use('/systems', systemsRoutes);
 router.use('/dashboard', dashboardRoutes);
 router.use('/support', supportRoutes);
+router.use('/ops-monitor', opsMonitorRoutes);
 
 export default router;

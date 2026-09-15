@@ -7,6 +7,7 @@ export async function fetchJiraItems(projectKey?: string, includeDone = false) {
       ...(projectKey ? { projectKey } : {}),
       ...(includeDone ? { includeDone: 'true' } : {}),
     },
+    timeout: 120000,
   });
   return data.data as JiraAllItemsResult;
 }

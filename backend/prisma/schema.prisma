@@ -99,3 +99,132 @@ model IssueHistory {
   @@index([issueId])
   @@map("issue_history")
 }
+
+/// DAX-HULP control-plane inventory: apps, hosts and databases we monitor.
+/// Live metrics come from each product's `dax-ops-agent` (or a direct SQL probe).
+model OpsTarget {
+  targetId         Int       @id @default(autoincrement()) @map("target_id")
+  targetKey        String    @unique @map("target_key") @db.NVarChar(80)
+  displayName      String    @map("display_name") @db.NVarChar(150)
+  /// thuiszorgtv | kadaster | kadaster-statia-saba | tereno | dataaxishulp
+  productFamily    String    @map("product_family") @db.NVarChar(50)
+  /// application | database | host | vercel
+  componentKind    String    @map("component_kind") @db.NVarChar(30)
+  /// local | preview | production
+  environment      String    @db.NVarChar(30)
+  /// App that should host the agent: thuiszorgtv | kadaster | tereno | dataaxishulp
+  ownerApp         String    @map("owner_app") @db.NVarChar(50)
+  /// Always `daxhulp` — this row lives in Dataaxishulp, not in the client app.
+  origin           String    @default("daxhulp") @db.NVarChar(30)
+  /// dax_ops_agent | sql_direct | local_host | pending_agent
+  probeMode        String    @map("probe_mode") @db.NVarChar(30)
+  baseUrlEnvVar    String?   @map("base_url_env_var") @db.NVarChar(100)
+  healthPath       String    @default("/api/dax-ops/health") @map("health_path") @db.NVarChar(200)
+  authEnvVar       String?   @map("auth_env_var") @db.NVarChar(100)
+  vercelProjectId  String?   @map("vercel_project_id") @db.NVarChar(80)
+  region           String?   @db.NVarChar(40)
+  requiresVpn      Boolean   @default(false) @map("requires_vpn")
+  checkIntervalSec Int       @default(60) @map("check_interval_sec")
+  timeoutMs        Int       @default(15000) @map("timeout_ms")
+  isActive         Boolean   @default(true) @map("is_active")
+  agentInstalled   Boolean   @default(false) @map("agent_installed")
+  alertOnOffline   Boolean   @default(true) @map("alert_on_offline")
+  alertOnDegraded  Boolean   @default(true) @map("alert_on_degraded")
+  cpuWarnPercent   Int       @default(90) @map("cpu_warn_percent")
+  memWarnPercent   Int       @default(90) @map("mem_warn_percent")
+  diskWarnPercent  Int       @default(90) @map("disk_warn_percent")
+  notes            String?   @db.NVarChar(500)
+  lastStatus       String?   @map("last_status") @db.NVarChar(30)
+  lastCheckedAt    DateTime? @map("last_checked_at")
+  lastError        String?   @map("last_error") @db.NVarChar(500)
+  lastLatencyMs    Int?      @map("last_latency_ms")
+  lastAppVersion   String?   @map("last_app_version") @db.NVarChar(50)
+  lastGitSha       String?   @map("last_git_sha") @db.NVarChar(40)
+  lastNodeVersion  String?   @map("last_node_version") @db.NVarChar(30)
+  lastHostname     String?   @map("last_hostname") @db.NVarChar(120)
+  lastRegion       String?   @map("last_region") @db.NVarChar(40)
+  lastCpuPercent   Float?    @map("last_cpu_percent")
+  lastMemUsedPct   Float?    @map("last_mem_used_pct")
+  lastDiskUsedPct  Float?    @map("last_disk_used_pct")
+  lastPayloadJson  String?   @map("last_payload_json") @db.NVarChar(Max)
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @default(now()) @updatedAt @map("updated_at")
+
+  logs   OpsHealthLog[]
+  alerts OpsAlertEvent[]
+
+  @@index([productFamily])
+  @@index([isActive, probeMode])
+  @@map("ops_targets")
+}
+
+/// One row per probe result received from an application or written by daxhulp.
+model OpsHealthLog {
+  logId           Int      @id @default(autoincrement()) @map("log_id")
+  targetId        Int      @map("target_id")
+  checkedAt       DateTime @default(now()) @map("checked_at")
+  /// online | degraded | offline | unknown | pending
+  status          String   @db.NVarChar(30)
+  latencyMs       Int?     @map("latency_ms")
+  httpStatus      Int?     @map("http_status")
+  error           String?  @db.NVarChar(500)
+  appVersion      String?  @map("app_version") @db.NVarChar(50)
+  gitSha          String?  @map("git_sha") @db.NVarChar(40)
+  nodeVersion     String?  @map("node_version") @db.NVarChar(30)
+  hostname        String?  @db.NVarChar(120)
+  region          String?  @db.NVarChar(40)
+  cpuPercent      Float?   @map("cpu_percent")
+  memUsedPercent  Float?   @map("mem_used_percent")
+  diskUsedPercent Float?   @map("disk_used_percent")
+  dbOnline        Boolean? @map("db_online")
+  dbLatencyMs     Int?     @map("db_latency_ms")
+  vercelEnv       String?  @map("vercel_env") @db.NVarChar(30)
+  /// daxhulp-poller wrote this row from a dax-ops-agent payload (or a failed call).
+  sourceModule    String   @default("daxhulp-poller") @map("source_module") @db.NVarChar(40)
+  payloadJson     String?  @map("payload_json") @db.NVarChar(Max)
+  alertTriggered  Boolean  @default(false) @map("alert_triggered")
+
+  target OpsTarget @relation(fields: [targetId], references: [targetId], onDelete: Cascade)
+
+  @@index([targetId, checkedAt])
+  @@index([status, checkedAt])
+  @@map("ops_health_logs")
+}
+
+/// Prepared notification trail. Channels (email/Teams) can be wired later.
+model OpsAlertEvent {
+  eventId            Int       @id @default(autoincrement()) @map("event_id")
+  targetId           Int       @map("target_id")
+  triggeredAt        DateTime  @default(now()) @map("triggered_at")
+  /// warning | critical | recovered
+  severity           String    @db.NVarChar(20)
+  /// offline | degraded | recovered | resource
+  kind               String    @db.NVarChar(30)
+  message            String    @db.NVarChar(500)
+  fromStatus         String?   @map("from_status") @db.NVarChar(30)
+  toStatus           String?   @map("to_status") @db.NVarChar(30)
+  acknowledgedAt     DateTime? @map("acknowledged_at")
+  /// pending | skipped | sent | failed
+  notificationStatus String    @default("pending") @map("notification_status") @db.NVarChar(20)
+  channel            String?   @db.NVarChar(30)
+  notificationError  String?   @map("notification_error") @db.NVarChar(300)
+
+  target OpsTarget @relation(fields: [targetId], references: [targetId], onDelete: Cascade)
+
+  @@index([targetId, triggeredAt])
+  @@index([notificationStatus])
+  @@map("ops_alert_events")
+}
+
+/// Live users currently using Dataaxishulp (heartbeat from the UI).
+model OpsPresence {
+  presenceId     Int      @id @default(autoincrement()) @map("presence_id")
+  productFamily  String   @map("product_family") @db.NVarChar(50)
+  userKey        String   @map("user_key") @db.NVarChar(80)
+  displayName    String   @map("display_name") @db.NVarChar(150)
+  lastSeenAt     DateTime @map("last_seen_at")
+
+  @@unique([productFamily, userKey])
+  @@index([productFamily, lastSeenAt])
+  @@map("ops_presences")
+}

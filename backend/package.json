@@ -5,12 +5,13 @@
   "main": "dist/index.js",
   "scripts": {
     "dev": "tsx watch src/index.ts",
-    "build": "prisma generate && tsc && node -e \"require('fs').mkdirSync('dist/utils',{recursive:true}); require('fs').copyFileSync('src/utils/tediousWorker.cjs','dist/utils/tediousWorker.cjs')\"",
+    "build": "node scripts/prisma-generate.cjs && tsc && node -e \"require('fs').mkdirSync('dist/utils',{recursive:true}); require('fs').copyFileSync('src/utils/tediousWorker.cjs','dist/utils/tediousWorker.cjs')\"",
     "start": "node dist/index.js",
     "postinstall": "prisma generate",
     "seed:admin": "tsx src/scripts/seedAdmin.ts",
     "seed:systems": "tsx src/scripts/seedSystems.ts",
-    "prisma:generate": "prisma generate",
+    "seed:ops": "tsx src/scripts/seedOpsTargets.ts",
+    "prisma:generate": "node scripts/prisma-generate.cjs",
     "prisma:push": "prisma db push",
     "prisma:studio": "prisma studio"
   },

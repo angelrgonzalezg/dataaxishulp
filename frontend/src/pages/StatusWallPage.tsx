@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import toast from 'react-hot-toast';
 import {
   Activity,
   AlertTriangle,
@@ -10,6 +11,7 @@ import {
   HardDrive,
   Maximize2,
   MemoryStick,
+  MessageCircle,
   Minimize2,
   RefreshCw,
   Server,
@@ -19,9 +21,18 @@ import {
   XCircle,
 } from 'lucide-react';
 import { extractErrorMessage } from '@/api/client';
-import { useLocalHostHealth, useSystemsHealth, useMondayWall } from '@/hooks/useStatusWall';
+import { AppFleetSection } from '@/components/statusWall/AppFleetSection';
+import { IssueInboxPanel, type WallIssue } from '@/components/statusWall/IssueInboxPanel';
+import {
+  useOpsOverview,
+  useProbeOpsTargets,
+  useSendOpsWhatsAppTest,
+  useUpdateOpsInterval,
+} from '@/hooks/useOpsMonitor';
+import { useLocalHostHealth, useSystemsHealth, useMondayWall, useJiraWall } from '@/hooks/useStatusWall';
+import { getAppVersionLabel } from '@/lib/app-version';
 import { REFRESH_INTERVAL_OPTIONS, useStatusWallStore } from '@/store/statusWallStore';
-import type { LocalHostHealth, MondayItem, SystemHealth } from '@/types';
+import type { JiraItem, LocalHostHealth, MondayItem, SystemHealth } from '@/types';
 
 const BOARD_HEX: Record<string, string> = {
   statia: '#22c55e',
@@ -44,15 +55,23 @@ const URGENT_PRIORITIES = new Set([
   'critica',
 ]);
 
-function isUrgent(item: MondayItem): boolean {
-  const priority = (item.priority ?? '').toLowerCase();
-  const status = (item.status ?? '').toLowerCase();
+function isUrgentPriority(priority?: string | null, status?: string | null): boolean {
+  const p = (priority ?? '').toLowerCase();
+  const s = (status ?? '').toLowerCase();
   return (
-    URGENT_PRIORITIES.has(priority) ||
-    status.includes('urgent') ||
-    status.includes('blocked') ||
-    status.includes('bloque')
+    URGENT_PRIORITIES.has(p) ||
+    s.includes('urgent') ||
+    s.includes('blocked') ||
+    s.includes('bloque')
   );
+}
+
+function isUrgentMonday(item: MondayItem): boolean {
+  return isUrgentPriority(item.priority, item.status);
+}
+
+function isUrgentJira(item: JiraItem): boolean {
+  return isUrgentPriority(item.priority, item.status);
 }
 
 function statusColor(system: SystemHealth): 'online' | 'offline' | 'unknown' {
@@ -120,9 +139,11 @@ function ResourceMetric({
 function LocalMachineCard({
   host,
   isError,
+  connectedUsers,
 }: {
   host: LocalHostHealth | undefined;
   isError: boolean;
+  connectedUsers: Array<{ name: string }>;
 }) {
   const { t } = useTranslation();
   const hostOnline = Boolean(host) && !isError;
@@ -203,6 +224,13 @@ function LocalMachineCard({
           </p>
         </>
       )}
+      <p className="mt-3 flex items-center gap-2 text-xs text-slate-300">
+        <Users className="h-3.5 w-3.5" />
+        {t('statusWall.hulpUsers')}:{' '}
+        {connectedUsers.length > 0
+          ? `${connectedUsers.length} · ${connectedUsers.map((user) => user.name).join(', ')}`
+          : t('statusWall.noConnectedUsers')}
+      </p>
     </div>
   );
 }
@@ -314,6 +342,12 @@ export function StatusWallPage() {
   const hostQuery = useLocalHostHealth(refreshIntervalMs);
   const systemsQuery = useSystemsHealth(refreshIntervalMs);
   const mondayQuery = useMondayWall(refreshIntervalMs);
+  const jiraQuery = useJiraWall(refreshIntervalMs);
+  const opsQuery = useOpsOverview(refreshIntervalMs);
+  const probeOps = useProbeOpsTargets();
+  const updateOpsInterval = useUpdateOpsInterval();
+  const whatsappTest = useSendOpsWhatsAppTest();
+  const whatsapp = opsQuery.data?.whatsapp;
 
   useEffect(() => {
     const timer = window.setInterval(() => setNow(new Date()), 1000);
@@ -337,6 +371,9 @@ export function StatusWallPage() {
   const systems = systemsQuery.data ?? [];
   const onlineSystems = systems.filter((system) => statusColor(system) === 'online');
   const offlineSystems = systems.filter((system) => statusColor(system) === 'offline');
+  const apps = opsQuery.data?.targets ?? [];
+  const offlineApps = apps.filter((target) => target.last_status === 'offline');
+  const degradedApps = apps.filter((target) => target.last_status === 'degraded');
   const host = hostQuery.data;
   const hostResourceAlert = Boolean(
     host &&
@@ -354,16 +391,63 @@ export function StatusWallPage() {
       ),
     [boards],
   );
-  const urgentItems = useMemo(() => pendingItems.filter(isUrgent), [pendingItems]);
+  const urgentItems = useMemo(() => pendingItems.filter(isUrgentMonday), [pendingItems]);
   const sortedPending = useMemo(
-    () => [...pendingItems].sort((a, b) => Number(isUrgent(b)) - Number(isUrgent(a))),
+    () => [...pendingItems].sort((a, b) => Number(isUrgentMonday(b)) - Number(isUrgentMonday(a))),
     [pendingItems],
   );
+  const jiraProjects = jiraQuery.data?.projects ?? [];
+  const jiraPendingItems = useMemo(
+    () =>
+      jiraProjects.flatMap((project) =>
+        project.open_items.map((item) => ({ ...item, project_key: project.project_key, project_label: project.label })),
+      ),
+    [jiraProjects],
+  );
+  const urgentJira = useMemo(() => jiraPendingItems.filter(isUrgentJira), [jiraPendingItems]);
+  const sortedJira = useMemo(
+    () => [...jiraPendingItems].sort((a, b) => Number(isUrgentJira(b)) - Number(isUrgentJira(a))),
+    [jiraPendingItems],
+  );
+  const jiraPending = jiraPendingItems.length;
+  const jiraDone = jiraProjects.reduce((sum, project) => sum + project.counts.done, 0);
+  const mondayWallItems: WallIssue[] = sortedPending.map((item) => ({
+    id: `${item.board}-${item.monday_item_id}`,
+    name: item.name,
+    sourceLabel: item.board_label,
+    sourceColor: boardHex(item.board_key),
+    extra: item.group || undefined,
+    status: item.status,
+    assignee: item.assignee,
+    urgent: isUrgentMonday(item),
+  }));
+  const jiraWallItems: WallIssue[] = sortedJira.map((item) => ({
+    id: item.jira_issue_key,
+    name: `${item.jira_issue_key} · ${item.name}`,
+    sourceLabel: item.project_label,
+    sourceColor: boardHex(item.project_key),
+    extra: item.issue_type || undefined,
+    status: item.status,
+    assignee: item.assignee,
+    urgent: isUrgentJira(item),
+  }));
   const totalPending = pendingItems.length;
   const totalDone = boards.reduce((sum, board) => sum + board.counts.done, 0);
 
-  const hasAlert = hostAlert || offlineSystems.length > 0 || urgentItems.length > 0;
-  const lastUpdatedAt = Math.max(hostQuery.dataUpdatedAt, systemsQuery.dataUpdatedAt);
+  const hasAlert =
+    hostAlert ||
+    offlineSystems.length > 0 ||
+    offlineApps.length > 0 ||
+    degradedApps.length > 0 ||
+    urgentItems.length > 0 ||
+    urgentJira.length > 0;
+  const lastUpdatedAt = Math.max(
+    hostQuery.dataUpdatedAt,
+    systemsQuery.dataUpdatedAt,
+    opsQuery.dataUpdatedAt,
+    jiraQuery.dataUpdatedAt,
+    mondayQuery.dataUpdatedAt,
+  );
   const lastUpdated = lastUpdatedAt
     ? new Date(lastUpdatedAt)
     : null;
@@ -372,6 +456,14 @@ export function StatusWallPage() {
     void hostQuery.refetch();
     void systemsQuery.refetch();
     void mondayQuery.refetch();
+    void jiraQuery.refetch();
+    void opsQuery.refetch();
+    void probeOps.mutateAsync();
+  }
+
+  function onRefreshIntervalChange(value: number) {
+    setRefreshIntervalMs(value);
+    void updateOpsInterval.mutateAsync(Math.round(value / 1000));
   }
 
   return (
@@ -388,7 +480,7 @@ export function StatusWallPage() {
           <div>
             <h1 className="text-2xl font-extrabold tracking-tight">{t('statusWall.title')}</h1>
             <p className="text-sm text-slate-400">
-              {now.toLocaleDateString()} · {now.toLocaleTimeString()}
+              {now.toLocaleDateString()} · {now.toLocaleTimeString()} · {getAppVersionLabel()} · DAX-HULP
             </p>
           </div>
         </div>
@@ -405,7 +497,7 @@ export function StatusWallPage() {
 
           <select
             value={refreshIntervalMs}
-            onChange={(event) => setRefreshIntervalMs(Number(event.target.value))}
+            onChange={(event) => onRefreshIntervalChange(Number(event.target.value))}
             className="h-10 rounded-xl border border-slate-700 bg-slate-900 px-3 text-sm text-slate-200 focus:outline-none"
             title={t('statusWall.refreshEvery')}
           >
@@ -416,6 +508,39 @@ export function StatusWallPage() {
             ))}
           </select>
 
+          <span
+            className={`flex h-10 items-center gap-1.5 rounded-xl border px-3 text-xs font-semibold ${
+              whatsapp?.configured
+                ? 'border-emerald-700/60 bg-emerald-950/30 text-emerald-200'
+                : 'border-amber-700/60 bg-amber-950/30 text-amber-200'
+            }`}
+            title={whatsapp?.missing?.join(', ') || whatsapp?.last_error || ''}
+          >
+            <MessageCircle className="h-4 w-4" />
+            {whatsapp?.configured
+              ? t('statusWall.whatsappReady', { to: whatsapp.to.join(', ') })
+              : t('statusWall.whatsappMissing')}
+          </span>
+
+          <button
+            type="button"
+            onClick={() => {
+              void whatsappTest.mutateAsync()
+                .then((result) => {
+                  toast.success(t('statusWall.whatsappTestOk', { to: result.to.join(', ') }));
+                })
+                .catch((error) => {
+                  toast.error(extractErrorMessage(error), { duration: 8000 });
+                });
+            }}
+            disabled={whatsappTest.isPending}
+            className="flex h-10 items-center gap-1.5 rounded-xl border border-emerald-700/60 bg-emerald-950/40 px-3 text-sm font-semibold text-emerald-200 hover:bg-emerald-900/40 disabled:opacity-60"
+            title={whatsapp?.to?.join(', ') || t('statusWall.whatsappTest')}
+          >
+            <MessageCircle className={`h-4 w-4 ${whatsappTest.isPending ? 'animate-pulse' : ''}`} />
+            {whatsappTest.isPending ? t('statusWall.whatsappSending') : t('statusWall.whatsappTest')}
+          </button>
+
           <button
             type="button"
             onClick={refreshAll}
@@ -423,7 +548,12 @@ export function StatusWallPage() {
           >
             <RefreshCw
               className={`h-4 w-4 ${
-                hostQuery.isFetching || systemsQuery.isFetching || mondayQuery.isFetching
+                hostQuery.isFetching ||
+                systemsQuery.isFetching ||
+                mondayQuery.isFetching ||
+                jiraQuery.isFetching ||
+                opsQuery.isFetching ||
+                probeOps.isPending
                   ? 'animate-spin'
                   : ''
               }`}
@@ -456,6 +586,20 @@ export function StatusWallPage() {
                     : t('statusWall.hostResourcesHigh')}
               </span>
             )}
+            {offlineApps.length > 0 && (
+              <span className="flex items-center gap-2">
+                <XCircle className="h-4 w-4" />
+                {t('statusWall.appsDown', { count: offlineApps.length })}:{' '}
+                {offlineApps.map((target) => target.display_name).join(', ')}
+              </span>
+            )}
+            {degradedApps.length > 0 && (
+              <span className="flex items-center gap-2">
+                <AlertTriangle className="h-4 w-4" />
+                {t('statusWall.appsDegraded', { count: degradedApps.length })}:{' '}
+                {degradedApps.map((target) => target.display_name).join(', ')}
+              </span>
+            )}
             {offlineSystems.length > 0 && (
               <span className="flex items-center gap-2">
                 <XCircle className="h-4 w-4" />
@@ -463,10 +607,10 @@ export function StatusWallPage() {
                 {offlineSystems.map((system) => system.name).join(', ')}
               </span>
             )}
-            {urgentItems.length > 0 && (
+            {urgentItems.length + urgentJira.length > 0 && (
               <span className="flex items-center gap-2">
                 <AlertTriangle className="h-4 w-4" />
-                {t('statusWall.urgentIssues', { count: urgentItems.length })}
+                {t('statusWall.urgentIssues', { count: urgentItems.length + urgentJira.length })}
               </span>
             )}
           </div>
@@ -486,7 +630,58 @@ export function StatusWallPage() {
             </span>
           </div>
 
-          <LocalMachineCard host={host} isError={hostQuery.isError} />
+          <AppFleetSection
+            targets={apps}
+            isError={opsQuery.isError}
+            errorMessage={opsQuery.error ? extractErrorMessage(opsQuery.error) : undefined}
+          />
+
+          <section className="mb-5 rounded-2xl border border-slate-800 bg-slate-950/60 p-4">
+            <h3 className="mb-3 flex items-center gap-2 text-sm font-bold text-white">
+              <MessageCircle className="h-4 w-4 text-emerald-300" />
+              {t('statusWall.recentAlerts')}
+            </h3>
+            {(opsQuery.data?.recent_alerts ?? []).length === 0 ? (
+              <p className="text-sm text-slate-500">{t('statusWall.noRecentAlerts')}</p>
+            ) : (
+              <ul className="space-y-2">
+                {(opsQuery.data?.recent_alerts ?? []).slice(0, 6).map((alert) => (
+                  <li
+                    key={alert.event_id}
+                    className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-800 bg-slate-900/70 px-3 py-2 text-sm"
+                  >
+                    <div className="min-w-0">
+                      <p className="truncate font-semibold text-slate-100">
+                        {alert.target_name} · {alert.kind}
+                      </p>
+                      <p className="truncate text-xs text-slate-500">{alert.message}</p>
+                    </div>
+                    <span
+                      className={`rounded-full px-2 py-0.5 text-[10px] font-extrabold uppercase ${
+                        alert.notification_status === 'sent'
+                          ? 'bg-emerald-500/20 text-emerald-200'
+                          : alert.notification_status === 'failed'
+                            ? 'bg-red-500/20 text-red-200'
+                            : 'bg-slate-700/60 text-slate-300'
+                      }`}
+                    >
+                      {alert.notification_status === 'sent'
+                        ? t('statusWall.alertSent')
+                        : alert.notification_status === 'failed'
+                          ? t('statusWall.alertFailed')
+                          : t('statusWall.alertSkipped')}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+
+          <LocalMachineCard
+            host={host}
+            isError={hostQuery.isError}
+            connectedUsers={opsQuery.data?.control_plane_users ?? []}
+          />
 
           {systemsQuery.isError ? (
             <p className="rounded-2xl border border-red-500/40 bg-red-500/10 p-6 text-sm text-red-200">
@@ -505,108 +700,41 @@ export function StatusWallPage() {
           )}
         </section>
 
-        {/* Monday */}
-        <section className="space-y-4">
-          <div className="flex items-center justify-between">
-            <h2 className="flex items-center gap-2 text-lg font-bold text-white">
-              <AlertTriangle className="h-5 w-5 text-amber-300" />
-              {t('statusWall.monday')}
-            </h2>
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            <div className="rounded-2xl border border-amber-500/40 bg-amber-500/10 p-4">
-              <p className="text-xs font-semibold uppercase text-amber-300">
-                {t('statusWall.pending')}
-              </p>
-              <p className="mt-1 text-4xl font-extrabold text-white">{totalPending}</p>
-            </div>
-            <div className="rounded-2xl border border-emerald-500/30 bg-emerald-500/10 p-4">
-              <p className="text-xs font-semibold uppercase text-emerald-300">
-                {t('statusWall.done')}
-              </p>
-              <p className="mt-1 text-4xl font-extrabold text-white">{totalDone}</p>
-            </div>
-          </div>
-
-          {boards.length > 0 && (
-            <div className="flex flex-wrap gap-2">
-              {boards.map((board) => (
-                <span
-                  key={board.board_key}
-                  className="flex items-center gap-2 rounded-full border border-slate-700 bg-slate-900 px-3 py-1 text-xs font-semibold text-slate-200"
-                >
-                  <span
-                    className="h-2.5 w-2.5 rounded-full"
-                    style={{ backgroundColor: boardHex(board.board_key) }}
-                  />
-                  {board.label}: {board.counts.open}
-                </span>
-              ))}
-            </div>
-          )}
-
-          <div className="max-h-[52vh] space-y-2 overflow-y-auto pr-1">
-            {mondayQuery.isError ? (
-              <p className="rounded-2xl border border-slate-800 bg-slate-900 p-4 text-sm text-slate-400">
-                {t('statusWall.mondayUnavailable')}
-              </p>
-            ) : sortedPending.length === 0 ? (
-              <p className="rounded-2xl border border-slate-800 bg-slate-900 p-4 text-sm text-slate-400">
-                {mondayQuery.isLoading ? t('common.loading') : t('statusWall.noPending')}
-              </p>
-            ) : (
-              sortedPending.map((item) => {
-                const urgent = isUrgent(item);
-                return (
-                  <div
-                    key={`${item.board}-${item.monday_item_id}`}
-                    className={`rounded-xl border p-3 ${
-                      urgent
-                        ? 'border-red-500/60 bg-red-500/10'
-                        : 'border-slate-800 bg-slate-900'
-                    }`}
-                  >
-                    <div className="flex items-start justify-between gap-2">
-                      <p className="text-sm font-semibold text-white">{item.name}</p>
-                      {urgent && (
-                        <span className="shrink-0 rounded-full bg-red-500/25 px-2 py-0.5 text-[10px] font-bold uppercase text-red-200">
-                          {t('statusWall.urgent')}
-                        </span>
-                      )}
-                    </div>
-                    <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-400">
-                      <span
-                        className="flex items-center gap-1.5"
-                        style={{ color: boardHex(item.board_key) }}
-                      >
-                        ● {item.board_label}
-                        {item.group ? ` · ${item.group}` : ''}
-                      </span>
-                      {item.status && <span>{item.status}</span>}
-                      {item.assignee && (
-                        <span className="flex items-center gap-1">
-                          <Users className="h-3 w-3" />
-                          {item.assignee}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                );
-              })
-            )}
-          </div>
-        </section>
+        <div className="space-y-6">
+          <IssueInboxPanel
+            title={t('statusWall.monday')}
+            accentClass="text-amber-300"
+            pending={totalPending}
+            done={totalDone}
+            chips={boards.map((board) => ({
+              key: board.board_key,
+              label: board.label,
+              color: boardHex(board.board_key),
+              open: board.counts.open,
+            }))}
+            items={mondayWallItems}
+            isError={mondayQuery.isError}
+            isLoading={mondayQuery.isLoading}
+            errorLabel={t('statusWall.mondayUnavailable')}
+          />
+          <IssueInboxPanel
+            title={t('statusWall.jira')}
+            accentClass="text-sky-300"
+            pending={jiraPending}
+            done={jiraDone}
+            chips={jiraProjects.map((project) => ({
+              key: project.project_key,
+              label: project.label,
+              color: boardHex(project.project_key),
+              open: project.counts.open,
+            }))}
+            items={jiraWallItems}
+            isError={jiraQuery.isError}
+            isLoading={jiraQuery.isLoading}
+            errorLabel={t('statusWall.jiraUnavailable')}
+          />
+        </div>
       </div>
-
-      {/* Placeholder: who is attending cases (next step) */}
-      <section className="mt-5 rounded-2xl border border-dashed border-slate-700 bg-slate-900/50 p-5">
-        <h2 className="flex items-center gap-2 text-sm font-bold uppercase tracking-wide text-slate-400">
-          <Users className="h-4 w-4" />
-          {t('statusWall.attendingTitle')}
-        </h2>
-        <p className="mt-1 text-sm text-slate-500">{t('statusWall.attendingSoon')}</p>
-      </section>
 
       <footer className="mt-4 flex items-center gap-2 text-xs text-slate-500">
         <Clock className="h-3.5 w-3.5" />

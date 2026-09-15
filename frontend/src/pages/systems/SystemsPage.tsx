@@ -1,10 +1,11 @@
 import { useTranslation } from 'react-i18next';
 import toast from 'react-hot-toast';
-import { Database, PlugZap } from 'lucide-react';
+import { Cloud, Database, PlugZap } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Card, CardHeader } from '@/components/ui/Card';
 import { PermissionGate } from '@/components/PermissionGate';
 import { extractErrorMessage } from '@/api/client';
+import { useOpsOverview } from '@/hooks/useOpsMonitor';
 import { useSystems, useTestSystem } from '@/hooks/useSystems';
 import type { SystemConnection } from '@/types';
 
@@ -22,6 +23,7 @@ export function SystemsPage() {
   const { t } = useTranslation();
   const { data, isLoading, isError } = useSystems();
   const testSystem = useTestSystem();
+  const opsQuery = useOpsOverview(false);
 
   async function onTest(systemId: number) {
     const toastId = toast.loading(t('systems.testing'));
@@ -45,6 +47,52 @@ export function SystemsPage() {
           description={t('systems.description')}
           icon={<Database style={{ width: 20, height: 20 }} />}
         />
+      </Card>
+
+      <Card>
+        <CardHeader
+          title={t('systems.fleetTitle')}
+          description={t('systems.fleetDescription')}
+          icon={<Cloud style={{ width: 20, height: 20 }} />}
+        />
+        <div className="space-y-3 px-6 pb-6">
+          {(opsQuery.data?.targets ?? []).map((target) => (
+            <div
+              key={target.target_id}
+              className="rounded-xl border border-ink-100 bg-ink-50/60 p-4 text-sm text-ink-700"
+            >
+              <div className="flex flex-wrap items-center gap-2">
+                <h3 className="text-base font-bold text-ink-900">{target.display_name}</h3>
+                <span className="rounded-full bg-violet-100 px-2 py-0.5 text-[10px] font-bold uppercase text-violet-800">
+                  {target.agent_installed ? t('systems.agentReady') : t('systems.agentPending')}
+                </span>
+                <span className="rounded-full bg-ink-100 px-2 py-0.5 text-[10px] font-bold uppercase text-ink-600">
+                  {target.origin}
+                </span>
+              </div>
+              <div className="mt-2 grid gap-1 sm:grid-cols-2">
+                <p>
+                  <span className="font-semibold text-ink-800">{t('systems.family')}: </span>
+                  {target.product_family}
+                </p>
+                <p>
+                  <span className="font-semibold text-ink-800">{t('systems.environment')}: </span>
+                  {target.environment}
+                </p>
+                <p>
+                  <span className="font-semibold text-ink-800">{t('systems.interval')}: </span>
+                  {t('systems.seconds', { count: target.check_interval_sec })}
+                </p>
+                <p>
+                  <span className="font-semibold text-ink-800">{t('systems.lastChecked')}: </span>
+                  {target.last_checked_at ? new Date(target.last_checked_at).toLocaleString() : '—'}
+                  {target.last_status ? ` · ${target.last_status}` : ''}
+                </p>
+              </div>
+              {target.notes && <p className="mt-2 text-xs text-ink-500">{target.notes}</p>}
+            </div>
+          ))}
+        </div>
       </Card>
 
       {isError && <Card className="p-6 text-sm text-red-600">{t('systems.loadError')}</Card>}

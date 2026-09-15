@@ -86,6 +86,144 @@ export interface LocalHostHealth {
   checked_at: string;
 }
 
+export type OpsStatus = 'online' | 'degraded' | 'offline' | 'unknown' | 'pending';
+export type OpsProbeMode = 'dax_ops_agent' | 'sql_direct' | 'local_host' | 'pending_agent';
+
+export interface DaxOpsDependency {
+  key: string;
+  kind: 'database' | 'storage' | 'http' | 'other';
+  online: boolean;
+  latency_ms: number | null;
+  error: string | null;
+  detail?: Record<string, unknown>;
+}
+
+export interface DaxOpsHealthReport {
+  contract: string;
+  module: string;
+  owner_app: string;
+  checked_at: string;
+  status: OpsStatus;
+  app: {
+    name: string;
+    version: string;
+    git_sha: string | null;
+    git_ref: string | null;
+    node_version: string;
+    uptime_seconds: number;
+  };
+  runtime: {
+    platform: 'vercel' | 'node';
+    hostname: string;
+    os: string;
+    arch: string;
+    region: string | null;
+    vercel: {
+      env: string | null;
+      url: string | null;
+      region: string | null;
+      deployment_id: string | null;
+      git_repo: string | null;
+    } | null;
+  };
+  resources: {
+    memory: HostResourceHealth & {
+      rss_bytes?: number;
+      heap_used_bytes?: number;
+      heap_total_bytes?: number;
+    };
+    cpu_usage_percent: number | null;
+    disk: (HostResourceHealth & { path: string }) | null;
+  };
+  dependencies: DaxOpsDependency[];
+  sessions?: {
+    active_count: number;
+    window_seconds: number;
+    users: Array<{ name: string; last_seen_at: string }>;
+  };
+}
+
+export interface OpsTarget {
+  target_id: number;
+  target_key: string;
+  display_name: string;
+  product_family: string;
+  component_kind: string;
+  environment: string;
+  owner_app: string;
+  origin: string;
+  probe_mode: OpsProbeMode;
+  health_path: string;
+  resolved_base_url: string | null;
+  has_auth_token: boolean;
+  vercel_project_id: string | null;
+  region: string | null;
+  requires_vpn: boolean;
+  check_interval_sec: number;
+  timeout_ms: number;
+  is_active: boolean;
+  agent_installed: boolean;
+  alert_on_offline: boolean;
+  alert_on_degraded: boolean;
+  notes: string | null;
+  last_status: OpsStatus | null;
+  last_checked_at: string | null;
+  last_error: string | null;
+  last_latency_ms: number | null;
+  last_app_version: string | null;
+  last_git_sha: string | null;
+  last_node_version: string | null;
+  last_hostname: string | null;
+  last_region: string | null;
+  last_cpu_percent: number | null;
+  last_mem_used_pct: number | null;
+  last_disk_used_pct: number | null;
+  last_report: DaxOpsHealthReport | null;
+  connected_users: {
+    count: number;
+    names: string[];
+  } | null;
+}
+
+export interface OpsAlert {
+  event_id: number;
+  target_id: number;
+  target_name: string;
+  triggered_at: string;
+  severity: string;
+  kind: string;
+  message: string;
+  from_status: string | null;
+  to_status: string | null;
+  notification_status: string;
+  channel: string | null;
+}
+
+export interface OpsOverview {
+  generated_at: string;
+  control_plane: 'daxhulp';
+  agent_module: 'dax-ops-agent';
+  probe_interval_sec: number;
+  targets: OpsTarget[];
+  recent_alerts: OpsAlert[];
+  control_plane_users: Array<{ name: string; last_seen_at: string }>;
+  whatsapp: {
+    configured: boolean;
+    provider: string;
+    to: string[];
+    missing: string[];
+    last_error: string | null;
+    last_sent_at: string | null;
+  };
+  counts: {
+    total: number;
+    online: number;
+    degraded: number;
+    offline: number;
+    pending: number;
+  };
+}
+
 export interface IssueUserSummary {
   user_id: number;
   username: string;

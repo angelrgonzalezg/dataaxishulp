@@ -28,6 +28,15 @@ Dataaxishulp/
 
 (Thuiszorg uses 3000/3001, so they do not conflict.)
 
+If a leftover `npm run dev` keeps a port (or locks Prisma `generate` / `build` on Windows), from the repo root:
+
+```bat
+scripts\show-ports.cmd
+scripts\stop-ports.cmd
+```
+
+Defaults are **3020** and **3021**. Other ports: `scripts\show-ports.cmd 3000 3001` / `scripts\stop-ports.cmd 3021`.
+
 ## Quick start
 
 > **Note:** there is no code in the repo root — the app is split into `backend/` and `frontend/`.
@@ -134,6 +143,53 @@ To add another system later:
    - `bonaire` — Bonaire (currently kadaster-like until verified)
 
 After schema changes: `npx prisma db push` then `npm run seed:systems`.
+
+## Ops monitor (DAX-HULP + DAX-OPS)
+
+Two layers so Dataaxishulp does not need VPN into every client database:
+
+| Prefix | Where | What |
+|--------|--------|------|
+| **daxhulp** | This repo (`ops_targets`, `ops_health_logs`, `ops_alert_events`, poller, Status Wall) | Inventory, logs, TV wall, alert trail |
+| **dax-ops-agent** | Inside each product (`/api/dax-ops/health`) | Live app + DB + Vercel snapshot |
+
+Today the agent is installed only in **Thuiszorgtv**. Kadaster, Kadaster Statia/Saba and Tereno are registered as `pending_agent`.
+
+```bash
+cd backend
+npx prisma db push
+npm run seed:ops
+```
+
+Set the same token in both apps:
+
+```env
+# Dataaxishulp backend/.env
+OPS_AGENT_TOKEN_THUISZORGTV=a-long-shared-secret
+OPS_TARGET_THUISZORGTV_LOCAL_URL=http://localhost:3000
+OPS_TARGET_THUISZORGTV_URL=https://your-thuiszorgtv.vercel.app
+
+# Thuiszorgtv .env
+DAX_OPS_AGENT_TOKEN=a-long-shared-secret
+```
+
+Canonical copy of the portable module: `shared/dax-ops-agent/`.
+
+WhatsApp alerts fire only on status transitions (`offline`, `degraded`, `recovered`) with a cooldown. Test number defaults to `+59995262686`. From the Status Wall, use **WhatsApp test**.
+
+```env
+# Dataaxishulp backend/.env
+OPS_ALERT_CHANNEL=whatsapp
+OPS_WHATSAPP_TO=+59995262686
+OPS_WHATSAPP_PROVIDER=cloud
+OPS_WHATSAPP_TOKEN=
+OPS_WHATSAPP_PHONE_NUMBER_ID=
+OPS_WHATSAPP_COOLDOWN_SEC=600
+OPS_WHATSAPP_KINDS=offline,degraded,recovered
+# First outbound to a new number may need a template:
+# OPS_WHATSAPP_TEMPLATE=hello_world
+# OPS_WHATSAPP_TEMPLATE_LANG=en_US
+```
 
 ## Roles
 

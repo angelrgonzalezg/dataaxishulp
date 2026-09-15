@@ -1,5 +1,6 @@
 import { Outlet, useMatches } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
+import { useOpsPresenceHeartbeat } from '@/hooks/useOpsPresenceHeartbeat';
 import { Sidebar } from './Sidebar';
 import { Topbar } from './Topbar';
 
@@ -9,6 +10,7 @@ interface RouteHandle {
 }
 
 export function AppLayout() {
+  useOpsPresenceHeartbeat();
   const { t } = useTranslation();
   const matches = useMatches();
   const current = [...matches].reverse().find((match) => (match.handle as RouteHandle)?.titleKey);
